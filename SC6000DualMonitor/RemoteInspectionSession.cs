@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using IfModuleCs;
 using VM.Core;
 using VM.PlatformSDKCS;
@@ -15,7 +16,7 @@ namespace SC6000DualMonitor
         private readonly string _procedureName;
         private readonly string _conditionName;
         private readonly string _cameraIp;
-        public string TargetDescription { get { return _cameraIp + " | " + _procedureName + " / " + _conditionName + " (ID " + _condition.ModuParams.ModuleID + ")"; } }
+        public string TargetDescription { get { return _cameraIp + " | " + _procedure.Name + " / " + _condition.Name + " (ID " + _condition.ModuParams.ModuleID + ")"; } }
         private readonly IList<ConditionDefinition> _definitions;
         private readonly object _callbackGate = new object();
         private bool _disposed, _paused, _wasContinuous, _wasEnabled;
@@ -29,9 +30,19 @@ namespace SC6000DualMonitor
             _definitions = ConditionDefinition.Parse(settings.ConditionItems);
             _procedure = VmSolution.Instance[_procedureName] as VmProcedure;
             if (_procedure == null) throw new InvalidOperationException("검사 흐름을 찾을 수 없습니다: " + _procedureName + "\r\nconfig.ini의 PROCEDURE를 확인하세요.");
-            _condition = _procedure[settings.ConditionModuleName] as IfModuleTool;
-            if (_condition == null) throw new InvalidOperationException("Condition Detection 모듈을 찾을 수 없습니다: " + settings.ConditionModuleName + "\r\nconfig.ini의 CONDITION_MODULE을 확인하세요.");
-            // Validate the configured rows against the camera; never apply screenshot defaults.
+            // Use SDK instance names, not the generic title of the parameter dialog.
+            var modules = _procedure.GetAllModuleList();
+            var candidates = new List<IfModuleTool>();
+            for (int i = 0; i < modules.nNum; i++)
+            {
+                var module = _procedure.GetModuleByID(modules.astModuleInfo[i].nModuleID) as IfModuleTool;
+                if (module != null) candidates.Add(module);
+            }
+            var matches = candidates.Where(c => string.Equals(c.Name, _conditionName, StringComparison.Ordinal)).ToList();
+            if (matches.Count != 1)
+                throw new InvalidOperationException("Condition Detection 모듈 이름을 정확히 지정하세요: " + _conditionName +
+                    "\r\nSDK에서 확인한 이름: " + string.Join(", ", candidates.Select(c => c.Name + " (ID " + c.ID + ")")));
+            _condition = matches[0];
             ReadRanges();
             _condition.EnableResultCallback();
             _procedure.EnableResultCallback();

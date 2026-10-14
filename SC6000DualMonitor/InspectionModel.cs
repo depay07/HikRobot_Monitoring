@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -11,7 +11,7 @@ namespace SC6000DualMonitor
 {
     internal sealed class ConditionDefinition
     {
-        public const string DefaultItems = "float0:상단 치수;float1:중간 치수;float2:하단 치수;int0:홀 유무;float3:원 사이즈";
+        public const string DefaultItems = "float0;float1;float2;int0;float3";
         public string Name { get; private set; }
         public string Caption { get; private set; }
         public bool IsInteger { get { return Name.StartsWith("int", StringComparison.Ordinal); } }
@@ -107,20 +107,22 @@ namespace SC6000DualMonitor
     }
     internal static class InspectionSettingsController
     {
-        public static void Apply(IInspectionSettingsSession session, IList<ConditionRange> requested)
+        public static void Apply(IInspectionSettingsSession session, IList<ConditionRange> requested, IList<ConditionRange> baseline = null)
         {
             foreach (var range in requested) range.Validate();
             if (requested.Count == 0 || requested.Select(r => r.Definition.Name).Distinct().Count() != requested.Count)
                 throw new InvalidOperationException("허용 범위 항목 구성이 잘못되었습니다.");
             var original = session.ReadRanges();
-            if (!original.Select(r => r.Definition.Name).SequenceEqual(requested.Select(r => r.Definition.Name)))
+            if (!original.Select(r => r.Definition.Name).OrderBy(n => n, StringComparer.Ordinal).SequenceEqual(requested.Select(r => r.Definition.Name).OrderBy(n => n, StringComparer.Ordinal)))
                 throw new InvalidOperationException("설정 항목이 변경되었습니다. Set Up을 다시 여세요.");
+            if (baseline != null) VerifyUnchanged(baseline, original);
             session.Pause();
             bool writeAttempted = false, saveAttempted = false;
             try
             {
                 // Read again after pausing, so rollback restores the actual pre-edit camera values.
                 original = session.ReadRanges();
+                if (baseline != null) VerifyUnchanged(baseline, original);
                 writeAttempted = true;
                 foreach (var range in requested) session.WriteRange(range);
                 Verify(requested, session.ReadRanges());
@@ -150,9 +152,19 @@ namespace SC6000DualMonitor
             try { session.Resume(); }
             catch (Exception ex) { throw new InvalidOperationException("치수 적용과 저장은 완료했으나 검사 재개에 실패했습니다: " + ex.Message, ex); }
         }
+        private static bool SameRanges(IList<ConditionRange> expected, IList<ConditionRange> actual)
+        {
+            return expected.Count == actual.Count && actual.Select(r => r.Definition.Name).Distinct().Count() == actual.Count &&
+                expected.All(r => r.Matches(actual.FirstOrDefault(a => a.Definition.Name == r.Definition.Name)));
+        }
+        private static void VerifyUnchanged(IList<ConditionRange> baseline, IList<ConditionRange> actual)
+        {
+            if (!SameRanges(baseline, actual))
+                throw new InvalidOperationException("편집 중 카메라 조건이 변경되었습니다. 다시 읽은 후 적용하세요.");
+        }
         private static void Verify(IList<ConditionRange> expected, IList<ConditionRange> actual)
         {
-            if (expected.Count != actual.Count || expected.Where((r, i) => !r.Matches(actual[i])).Any())
+            if (!SameRanges(expected, actual))
                 throw new InvalidOperationException("카메라에서 다시 읽은 허용 범위가 요청값과 다릅니다.");
         }
     }

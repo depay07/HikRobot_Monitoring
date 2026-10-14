@@ -35,6 +35,7 @@ namespace SC6000DualMonitor
             _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Name", HeaderText = "조건 이름", ReadOnly = true, FillWeight = 80 });
             _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Min", HeaderText = "최소값", FillWeight = 100 });
             _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Max", HeaderText = "최대값", FillWeight = 100 });
+            foreach (DataGridViewColumn column in _grid.Columns) column.SortMode = DataGridViewColumnSortMode.NotSortable;
             _grid.DataError += delegate(object sender, DataGridViewDataErrorEventArgs e) { e.ThrowException = false; };
             layout.Controls.Add(_grid, 0, 1);
             _state = new Label { Dock = DockStyle.Fill, ForeColor = Color.FromArgb(20, 63, 110), AutoEllipsis = true };
@@ -50,7 +51,7 @@ namespace SC6000DualMonitor
             _apply.Click += delegate { Apply(); };
             Shown += delegate { ReadCamera(); };
         }
-        private void ReadCamera()
+        private bool ReadCamera()
         {
             _apply.Enabled = false;
             _grid.CancelEdit();
@@ -63,13 +64,23 @@ namespace SC6000DualMonitor
                 _ranges = _session.ReadRanges();
                 _grid.Rows.Clear();
                 foreach (var range in _ranges)
-                    _grid.Rows.Add(range.Definition.Caption, range.Definition.Name, Format(range.Min, range.Definition.IsInteger), Format(range.Max, range.Definition.IsInteger));
+                {
+                    int row = _grid.Rows.Add(range.Definition.Caption, range.Definition.Name, Format(range.Min, range.Definition.IsInteger), Format(range.Max, range.Definition.IsInteger));
+                    _grid.Rows[row].Tag = range.Definition;
+                }
                 _state.Text = DateTime.Now.ToString("HH:mm:ss") + " 카메라 조회 완료 (" + _ranges.Count + "개)";
                 _apply.Enabled = true;
+                return true;
             }
-            catch (Exception ex) { ShowFailure(ex); }
+            catch (Exception ex)
+            {
+                _ranges = null;
+                _grid.Rows.Clear();
+                _state.Text = "재조회 실패: " + ex.Message;
+                return false;
+            }
         }
-        private static string Format(double value, bool integer) { return value.ToString(integer ? "0" : "0.######", CultureInfo.CurrentCulture); }
+        private static string Format(double value, bool integer) { return value.ToString(integer ? "0" : "R", CultureInfo.CurrentCulture); }
         private static double Parse(object value, string caption)
         {
             double number;
@@ -83,19 +94,19 @@ namespace SC6000DualMonitor
         {
             try
             {
+                if (_ranges == null) throw new InvalidOperationException("카메라 값을 먼저 다시 읽으세요.");
                 if (!_grid.EndEdit()) throw new InvalidOperationException("입력값을 확인하세요.");
                 var requested = new List<ConditionRange>();
-                for (int i = 0; i < _ranges.Count; i++)
+                foreach (DataGridViewRow row in _grid.Rows)
                 {
-                    var definition = _ranges[i].Definition;
-                    var row = _grid.Rows[i];
+                    var definition = row.Tag as ConditionDefinition;
+                    if (definition == null) throw new InvalidOperationException("조건 연결 정보가 없습니다. 다시 읽으세요.");
                     requested.Add(new ConditionRange(definition, Parse(row.Cells["Min"].Value, definition.Caption), Parse(row.Cells["Max"].Value, definition.Caption)));
                 }
                 Enabled = false;
                 _state.Text = "카메라에 적용·확인·저장 중..."; _state.Refresh();
-                InspectionSettingsController.Apply(_session, requested);
-                ReadCamera();
-                _state.Text = "카메라 적용 및 레시피 저장 완료";
+                InspectionSettingsController.Apply(_session, requested, _ranges);
+                if (ReadCamera()) _state.Text = "카메라 적용 및 레시피 저장 완료";
             }
             catch (Exception ex) { ShowFailure(ex); }
             finally { Enabled = true; }

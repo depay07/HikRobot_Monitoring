@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -57,6 +57,12 @@ internal static class InspectionLogicTests
         var after = new[] { new ConditionRange(definitions[0], 15, 16), new ConditionRange(definitions[4], 7, 8) };
         var success = new FakeSession(before); InspectionSettingsController.Apply(success, after);
         Check(success.Values[0].Matches(after[0]) && success.Saves == 1 && success.Resumed, "apply readback save resume");
+        var stale = new FakeSession(after);
+        Throws(() => InspectionSettingsController.Apply(stale, before, before), "stale edit rejected");
+        Check(stale.Writes == 0 && !stale.Paused, "stale editor cannot overwrite camera changes");
+        var reordered = new FakeSession(before);
+        InspectionSettingsController.Apply(reordered, after.Reverse().ToArray(), before);
+        Check(reordered.Values[0].Matches(after[0]) && reordered.Saves == 1, "condition identity independent of order");
         var partial = new FakeSession(before) { FailWriteAt = 2 };
         Throws(() => InspectionSettingsController.Apply(partial, after), "partial failure");
         Check(partial.Values[0].Matches(before[0]) && partial.Values[1].Matches(before[1]) && partial.Resumed && partial.Saves == 0, "partial rollback");

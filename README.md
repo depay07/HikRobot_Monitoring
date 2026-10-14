@@ -43,14 +43,14 @@ SOLUTION_DIRECTORY=
 - **Reset**: 해당 카메라의 카운터만 초기화합니다. 카운터는 프로그램 실행 세션 동안 유지하고 Solution 전환 시 초기화합니다. 두 카메라의 수량은 각각 집계하며 제품 기준으로 합산하지 않습니다.
 - **Set Up**: 카메라 내부 Condition Detection의 현재 최소/최대값을 읽고 수정합니다. `적용 및 카메라 저장`은 입력 검증 → 해당 흐름 일시 정지 → 범위 변경 → 카메라 재조회 확인 → `VmSolution.Save()` → 기존 실행 상태 복원을 수행합니다. 부분 실패 시 기존 범위를 복원하고, 복원 실패 시 해당 흐름을 정지 상태로 유지합니다. 생산 트리거를 멈춘 상태에서 설정하세요. 설정 중 검사 결과는 집계에서 제외합니다.
 
-기존 `config.ini`는 자동으로 덮어쓰지 않습니다. 각 카메라 구역에 아래 값을 추가하세요. 생략 시에도 아래 기본값을 사용합니다. 첨부 `cam1.solx`는 `Proc1 / Condition Detection1`입니다.
+기존 `config.ini`는 자동으로 덮어쓰지 않습니다. 각 카메라 구역에 아래 값을 추가하세요. 생략 시에도 아래 기본값을 사용합니다. 아래 흐름/모듈 이름은 예제이며 실제 카메라의 SDK 이름과 일치해야 합니다.
 
 ```ini
 [CAMERA1]
 ; 기존 IP, PASSWORD, SOLUTION_PATH 등은 유지
 PROCEDURE=Proc1
 CONDITION_MODULE=Condition Detection1
-CONDITION_ITEMS=float0:상단 치수;float1:중간 치수;float2:하단 치수;int0:홀 유무;float3:원 사이즈
+CONDITION_ITEMS=float0;float1;float2;int0;float3
 PART_NO=
 ```
 
@@ -75,3 +75,12 @@ Set Up은 VisionMaster의 메뉴 창을 여는 대신, 지정한 흐름/Conditio
 창 위쪽의 카메라 IP, PROCEDURE, CONDITION_MODULE, 모듈 ID를 VisionMaster에서 연 대상과 비교하세요. `14 Condition Detection` 화면을 확인할 때는 같은 카메라와 Solution/흐름의 실제 모듈 이름을 `CONDITION_MODULE`에 지정해야 합니다. 번호만 보고 다른 모듈을 선택하지 마세요. VisionMaster에서 값 편집 후 Confirm으로 적용해야 장비에 반영된 값을 조회할 수 있습니다. 로컬 PC에서 연 Solution과 카메라의 Solution이 다르면 값도 다를 수 있습니다.
 
 재조회 시 조회 시각과 항목 수를 표시하며, 실패하면 이전 표를 지우고 적용을 비활성화합니다. 기존 SDK의 GetIfItemParam도 장비 조회를 호출하므로 이전 증상을 캐시 문제로 단정할 수 없습니다. 실제 카메라 없이 연결 대상과 장비 변경값 반영까지 검증할 수는 없습니다.
+
+## 재리뷰 수정 사항
+
+- 화면 제목만 보고 `Condition Detection` 또는 `Condition Detection1` 중 하나라고 단정하지 않습니다. SDK에서 해당 흐름의 실제 Condition Detection 모듈을 열거하고 정확한 `Name`으로 선택합니다. 이름이 틀리면 확인된 이름과 ID를 오류 메시지에 표시합니다. 연결 성공 후 Set Up에도 실제 SDK 이름을 표시합니다.
+- 기존 GetIfItemParam과 변경한 GetParamValue 모두 IMVS_GetParamValue를 호출합니다. 재읽기의 원래 값 불일치 원인은 아직 실장비에서 확정하지 못했습니다. 다른 카메라/흐름/Solution이나 VisionMaster의 미적용 편집 여부를 확인해야 합니다.
+- 표 정렬을 막고 행에 조건 이름을 연결하여 다른 조건의 값이 저장되지 않게 했습니다. 숫자를 다시 저장해도 정밀도가 손실되지 않도록 round-trip 형식으로 표시합니다.
+- 편집을 시작한 뒤 장비 값이 변경됐다면 적용을 중단하고 재읽기를 요구합니다. 조건 비교는 행 순서가 아닌 조건 이름을 사용합니다.
+- 저장 후 화면 재조회가 실패하면 그 오류를 유지하며 성공 문구로 덮지 않습니다.
+- 빌드와 모의 세션 회귀 테스트를 수행했습니다. 실제 카메라 연결, 원격 값 변경 반영, 저장 후 재부팅 지속성은 현장 검증이 필요합니다.
