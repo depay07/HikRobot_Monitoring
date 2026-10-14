@@ -42,6 +42,7 @@
     <Reference Include="System.Drawing" />
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Xml" />
+    <Reference Include="IMVSBlobFindModuCs"><Private>False</Private></Reference>
     <Reference Include="IfModuleCs">
       <Private>False</Private>
     </Reference>
@@ -70,6 +71,10 @@
     <Compile Include="SolutionManagement.cs" />
     <Compile Include="SolutionPane.cs" />
     <Compile Include="InspectionModel.cs" />
+    <Compile Include="BlobSettings.cs" />
+    <Compile Include="RemoteBlobSession.cs" />
+    <Compile Include="BlobSetupForm.cs" />
+    <Compile Include="SetupMenuForm.cs" />
     <Compile Include="ConditionParameterReader.cs" />
     <Compile Include="RemoteInspectionSession.cs" />
     <Compile Include="InspectionPane.cs" />

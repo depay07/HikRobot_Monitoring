@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Drawing;
 using System.IO;
 using System.Windows.Forms;
@@ -131,7 +131,7 @@ namespace SC6000DualMonitor
         {
             if (_session == null || _setupOpen) return;
             _setupOpen = true;
-            try { using (var form = new InspectionSetupForm(_session, _settings.Title)) form.ShowDialog(this); }
+            try { using (var form = new SetupMenuForm(_session, _settings)) form.ShowDialog(this); }
             finally { _setupOpen = false; }
         }
         protected override void Dispose(bool disposing)

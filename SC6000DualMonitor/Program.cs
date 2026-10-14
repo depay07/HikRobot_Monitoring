@@ -111,6 +111,7 @@ namespace SC6000DualMonitor
         public int MonitorIndex { get; set; }
         public string ProcedureName { get; set; }
         public string ConditionModuleName { get; set; }
+        public string BlobModuleName { get; set; }
         public string ConditionItems { get; set; }
         public string PartNumber { get; set; }
     }
@@ -205,6 +206,7 @@ namespace SC6000DualMonitor
                 Title = Get(section + ".TITLE", "SC6000 Camera " + slot),
                 ProcedureName = Get(section + ".PROCEDURE", "Proc1"),
                 ConditionModuleName = Get(section + ".CONDITION_MODULE", "Condition Detection1"),
+                BlobModuleName = Get(section + ".BLOB_MODULE", string.Empty).Trim(),
                 ConditionItems = Get(section + ".CONDITION_ITEMS", ConditionDefinition.DefaultItems),
                 PartNumber = Get(section + ".PART_NO", string.Empty),
                 MonitorIndex = MonitorIndex

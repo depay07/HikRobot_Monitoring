@@ -21,6 +21,19 @@ namespace SC6000DualMonitor
         private readonly object _callbackGate = new object();
         private bool _disposed, _paused, _wasContinuous, _wasEnabled;
         public event EventHandler<InspectionResultEventArgs> ResultArrived;
+        public string CameraProcedureDescription { get { return _cameraIp + " | " + _procedure.Name; } }
+        public IList<BlobModuleChoice> GetBlobModules()
+        {
+            var result = new List<BlobModuleChoice>();
+            var list = _procedure.GetAllModuleList();
+            for (int i = 0; i < list.nNum; i++)
+            {
+                var module = _procedure.GetModuleByID(list.astModuleInfo[i].nModuleID) as IMVSBlobFindModuCs.IMVSBlobFindModuTool;
+                if (module != null) result.Add(new BlobModuleChoice(module));
+            }
+            return result;
+        }
+
 
         public RemoteInspectionSession(CameraSettings settings)
         {

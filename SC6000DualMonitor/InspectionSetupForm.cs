@@ -16,7 +16,7 @@ namespace SC6000DualMonitor
         public InspectionSetupForm(IInspectionSettingsSession session, string title)
         {
             _session = session;
-            Text = title + " | Set Up";
+            Text = title + " | OK/NG 설정 조건";
             StartPosition = FormStartPosition.CenterParent;
             MinimumSize = new Size(580, 380);
             Size = new Size(860, 490);
