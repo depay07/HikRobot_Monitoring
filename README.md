@@ -33,3 +33,45 @@ SOLUTION_DIRECTORY=
 
 카메라 IP가 누락되거나 비어 있어도 메인 화면은 실행됩니다. 해당 카메라 영역에 설정 안내를 표시하고 연결을 건너뜁니다. 다른 카메라는 정상적으로 연결하며, 연결 실패도 해당 영역에 표시합니다.
 
+
+## 고객 검사 화면: PART NO / Count / Set Up
+
+각 카메라 영역에 다음 기능을 제공합니다.
+
+- **PART NO**: 입력 후 `모델명 저장`을 누릅니다. 카메라 IP와 실제 Solution 경로별로 `%LOCALAPPDATA%\WILLB\SC6000Monitor\Models`에 저장하여 재실행/레시피 전환 때 복원합니다. 표시 이름을 바꾸는 기능이며 Solution 선택은 기존 목록을 이용합니다. 장비의 현재 경로를 검증할 수 없으면 저장을 비활성화합니다.
+- **Count**: 검사 흐름 완료 콜백마다 `OK / NG / Errors / Total`을 집계합니다. 화면 갱신 타이머는 집계하지 않습니다. 실행 오류, 판정 읽기 실패, OK/NG 이외의 결과는 Errors로 집계합니다. Total = OK + NG + Errors입니다. 숫자 판정값의 의미는 SDK 문서에 정의되지 않아 추측하지 않고 `StrResult`의 OK/NG를 사용합니다.
+- **Reset**: 해당 카메라의 카운터만 초기화합니다. 카운터는 프로그램 실행 세션 동안 유지하고 Solution 전환 시 초기화합니다. 두 카메라의 수량은 각각 집계하며 제품 기준으로 합산하지 않습니다.
+- **Set Up**: 카메라 내부 Condition Detection의 현재 최소/최대값을 읽고 수정합니다. `적용 및 카메라 저장`은 입력 검증 → 해당 흐름 일시 정지 → 범위 변경 → 카메라 재조회 확인 → `VmSolution.Save()` → 기존 실행 상태 복원을 수행합니다. 부분 실패 시 기존 범위를 복원하고, 복원 실패 시 해당 흐름을 정지 상태로 유지합니다. 생산 트리거를 멈춘 상태에서 설정하세요. 설정 중 검사 결과는 집계에서 제외합니다.
+
+기존 `config.ini`는 자동으로 덮어쓰지 않습니다. 각 카메라 구역에 아래 값을 추가하세요. 생략 시에도 아래 기본값을 사용합니다. 첨부 `cam1.solx`는 `Proc1 / Condition Detection1`입니다.
+
+```ini
+[CAMERA1]
+; 기존 IP, PASSWORD, SOLUTION_PATH 등은 유지
+PROCEDURE=Proc1
+CONDITION_MODULE=Condition Detection1
+CONDITION_ITEMS=float0:상단 치수;float1:중간 치수;float2:하단 치수;int0:홀 유무;float3:원 사이즈
+PART_NO=
+```
+
+CAMERA2도 해당 레시피에 맞게 같은 항목을 지정합니다. `CONDITION_ITEMS`는 `조건이름:화면표시명`을 세미콜론으로 구분합니다. 정수 조건은 정수만 허용합니다. float1/float2 표시명은 필요에 따라 수정하세요. 치수 단위는 Variable Calculation의 출력 단위 그대로이며 프로그램에서 mm 변환을 추가하지 않습니다. 모듈/조건 이름이 맞지 않으면 해당 카메라의 검사 UI에 오류를 표시하고 기존 영상 화면은 계속 표시합니다.
+
+빌드 시 VisionMaster 설치 SDK의 **IfModuleCs.dll** 참조가 추가로 필요합니다. 자동으로 찾아지지 않으면 Visual Studio의 참조에서 설치된 SDK DLL을 지정하세요. SDK 공급업체 DLL은 저장소에 포함하지 않습니다.
+
+### 현장 확인
+
+1. 두 카메라 연결 후 PART NO를 각각 저장하고 재실행하여 복원 확인.
+2. 정상 3회 / 불량 2회 트리거 후 해당 카메라 OK=3, NG=2, Total=5 확인. 대기 중 카운터가 증가하지 않는지 확인.
+3. Reset 및 레시피 전환 후 중복 집계가 없는지 확인.
+4. 생산 트리거 정지 → Set Up에서 상단/원 치수 변경 → 저장 후 VisionMaster에서 실제 범위 및 IO 판정 확인.
+5. 카메라 전원 재투입 후 변경한 범위가 유지되는지 확인. 기존 비활성 흐름이 저장 과정에서 활성화되지 않았는지도 확인.
+
+SDK API는 제공된 .NET V4.4.30 문서와 C# 예제를 기준으로 구현했습니다. 실제 V4.4.50 공급업체 DLL 빌드와 카메라 Remote 동작은 Windows 현장 검증이 필요합니다.
+
+## Set Up 재조회 확인
+
+Set Up은 VisionMaster의 메뉴 창을 여는 대신, 지정한 흐름/Condition Detection의 SDK 파라미터를 읽는 별도 편집창입니다. 매번 `DynamicParams`에서 실제 숫자 조건 목록을 조회하고 각 조건의 `_Min`, `_Max`, `_ReMark`를 조회합니다. 검사 항목은 카메라 Remark를 우선 사용하며, Remark가 비어 있을 때만 `CONDITION_ITEMS` 표시명을 사용합니다. 새로 추가한 `int1` 등의 항목도 자동 표시됩니다.
+
+창 위쪽의 카메라 IP, PROCEDURE, CONDITION_MODULE, 모듈 ID를 VisionMaster에서 연 대상과 비교하세요. `14 Condition Detection` 화면을 확인할 때는 같은 카메라와 Solution/흐름의 실제 모듈 이름을 `CONDITION_MODULE`에 지정해야 합니다. 번호만 보고 다른 모듈을 선택하지 마세요. VisionMaster에서 값 편집 후 Confirm으로 적용해야 장비에 반영된 값을 조회할 수 있습니다. 로컬 PC에서 연 Solution과 카메라의 Solution이 다르면 값도 다를 수 있습니다.
+
+재조회 시 조회 시각과 항목 수를 표시하며, 실패하면 이전 표를 지우고 적용을 비활성화합니다. 기존 SDK의 GetIfItemParam도 장비 조회를 호출하므로 이전 증상을 캐시 문제로 단정할 수 없습니다. 실제 카메라 없이 연결 대상과 장비 변경값 반영까지 검증할 수는 없습니다.

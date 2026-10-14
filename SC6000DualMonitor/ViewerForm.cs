@@ -17,6 +17,7 @@ namespace SC6000DualMonitor
         private readonly Timer _layoutTimer = new Timer { Interval = 200 };
         private VmFrontendControl _frontend;
         private readonly SolutionPane _solutions;
+        private readonly RemoteSolutionSession _remoteSolutions;
         private readonly Label _status;
         private bool _frontendLoaded;
         private bool _connected;
@@ -36,7 +37,10 @@ namespace SC6000DualMonitor
             _status = new Label { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter,
                 ForeColor = Color.White, Font = new Font("Segoe UI", 12),
                 Text = settings.Title + "\r\n" + settings.Ip + "\r\n연결 중..." };
-            _solutions = new SolutionPane(new RemoteSolutionSession(settings.SolutionDirectory, settings.SolutionPassword), ReloadFrontend);
+            _remoteSolutions = new RemoteSolutionSession(settings.SolutionDirectory, settings.SolutionPassword);
+            _solutions = new SolutionPane(_remoteSolutions, ReloadFrontend, settings);
+            _solutions.SolutionChanging += _solutions.Inspection.Unbind;
+            _solutions.SolutionChanged += BindInspection;
             _solutions.Content.Controls.Add(_status);
             Controls.Add(_solutions);
             _layoutTimer.Tick += delegate { FitParent(); };
@@ -50,6 +54,26 @@ namespace SC6000DualMonitor
             _frontend.LoadFrontendSource();
             _frontendLoaded = true;
             QueueFrontendResize();
+        }
+
+        private void BindInspection()
+        {
+            RemoteInspectionSession inspection = null;
+            string path = null;
+            try { path = _remoteSolutions.VerifiedCurrentPath; }
+            catch (Exception ex) { Trace.WriteLine(ex); }
+            try
+            {
+                inspection = new RemoteInspectionSession(_settings);
+                _solutions.Inspection.Bind(inspection, path);
+            }
+            catch (Exception ex)
+            {
+                if (inspection != null) inspection.Dispose();
+                _solutions.Inspection.Failed(ex);
+                _solutions.Inspection.SetModelPath(path);
+                Trace.WriteLine(ex);
+            }
         }
 
         private void QueueFrontendResize()
@@ -136,6 +160,7 @@ namespace SC6000DualMonitor
                 QueueFrontendResize();
                 _status.Visible = false;
                 _solutions.Connected();
+                BindInspection();
             }
             catch (Exception ex)
             {
@@ -160,6 +185,7 @@ namespace SC6000DualMonitor
         {
             _layoutTimer.Stop();
             _layoutTimer.Dispose();
+            _solutions.Inspection.Unbind();
             if (_frontend != null) { _solutions.Content.Controls.Remove(_frontend); _frontend.Dispose(); }
             if (_connected)
                 try { VmSolution.Instance?.Dispose(); }

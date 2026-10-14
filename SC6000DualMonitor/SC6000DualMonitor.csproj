@@ -41,6 +41,10 @@
     <Reference Include="System.Core" />
     <Reference Include="System.Drawing" />
     <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Xml" />
+    <Reference Include="IfModuleCs">
+      <Private>False</Private>
+    </Reference>
     <Reference Include="VM.Core, Version=1.0.0.0, Culture=neutral, PublicKeyToken=61600122bc9264b9, processorArchitecture=MSIL">
       <Private>False</Private>
     </Reference>
@@ -65,6 +69,11 @@
     <Compile Include="MonitorHeader.cs" />
     <Compile Include="SolutionManagement.cs" />
     <Compile Include="SolutionPane.cs" />
+    <Compile Include="InspectionModel.cs" />
+    <Compile Include="ConditionParameterReader.cs" />
+    <Compile Include="RemoteInspectionSession.cs" />
+    <Compile Include="InspectionPane.cs" />
+    <Compile Include="InspectionSetupForm.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>

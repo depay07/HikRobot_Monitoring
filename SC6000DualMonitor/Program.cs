@@ -109,6 +109,10 @@ namespace SC6000DualMonitor
         public string SolutionDirectory { get; set; }
         public string SolutionPassword { get; set; }
         public int MonitorIndex { get; set; }
+        public string ProcedureName { get; set; }
+        public string ConditionModuleName { get; set; }
+        public string ConditionItems { get; set; }
+        public string PartNumber { get; set; }
     }
 
     internal sealed class IniConfig
@@ -199,6 +203,10 @@ namespace SC6000DualMonitor
                 SolutionDirectory = Get(section + ".SOLUTION_DIRECTORY", string.Empty),
                 SolutionPassword = Get(section + ".SOLUTION_PASSWORD", string.Empty),
                 Title = Get(section + ".TITLE", "SC6000 Camera " + slot),
+                ProcedureName = Get(section + ".PROCEDURE", "Proc1"),
+                ConditionModuleName = Get(section + ".CONDITION_MODULE", "Condition Detection1"),
+                ConditionItems = Get(section + ".CONDITION_ITEMS", ConditionDefinition.DefaultItems),
+                PartNumber = Get(section + ".PART_NO", string.Empty),
                 MonitorIndex = MonitorIndex
             };
         }

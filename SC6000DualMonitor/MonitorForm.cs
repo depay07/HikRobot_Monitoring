@@ -61,7 +61,7 @@ namespace SC6000DualMonitor
                 {
                     // Render the same controls without starting a viewer or contacting the SDK.
                     var solutions = new SolutionPane(
-                        new RemoteSolutionSession(camera.SolutionDirectory, camera.SolutionPassword), delegate { });
+                        new RemoteSolutionSession(camera.SolutionDirectory, camera.SolutionPassword), delegate { }, camera);
                     solutions.Content.Controls.Add(status);
                     panel.Controls.Add(solutions);
                 }

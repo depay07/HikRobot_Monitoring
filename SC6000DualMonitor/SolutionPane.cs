@@ -9,6 +9,9 @@ namespace SC6000DualMonitor
     internal sealed class SolutionPane : UserControl
     {
         public Panel Content { get; private set; }
+        public InspectionPane Inspection { get; private set; }
+        public event Action SolutionChanging;
+        public event Action SolutionChanged;
         private readonly SolutionController _controller;
         private readonly Action _reloadFrontend;
         private readonly Label _current = new Label { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleRight, AutoEllipsis = true, Text = "Solution: 연결 대기" };
@@ -20,15 +23,16 @@ namespace SC6000DualMonitor
 
         private bool _connected, _busy;
         private string _currentPath;
-        public SolutionPane(ISolutionSession session, Action reloadFrontend)
+        public SolutionPane(ISolutionSession session, Action reloadFrontend, CameraSettings settings = null)
         {
             _controller = new SolutionController(session); _reloadFrontend = reloadFrontend;
             Dock = DockStyle.Fill; AutoScaleMode = AutoScaleMode.None;
             Font = new Font("Segoe UI", 9F);
             BackColor = Color.FromArgb(45, 52, 56); ForeColor = Color.White;
-            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Margin = Padding.Empty, Padding = Padding.Empty };
+            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Margin = Padding.Empty, Padding = Padding.Empty };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 116));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             Content = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty };
@@ -48,7 +52,8 @@ namespace SC6000DualMonitor
             // Preferred size includes the actual font metrics at the current DPI.
             _refresh.MinimumSize = _refresh.GetPreferredSize(Size.Empty);
             _change.MinimumSize = _change.GetPreferredSize(Size.Empty);
-            layout.Controls.Add(_current, 0, 0); layout.Controls.Add(Content, 0, 1); layout.Controls.Add(footer, 0, 2);
+            Inspection = new InspectionPane(settings);
+            layout.Controls.Add(_current, 0, 0); layout.Controls.Add(Inspection, 0, 1); layout.Controls.Add(Content, 0, 2); layout.Controls.Add(footer, 0, 3);
             Controls.Add(layout);
             _choices.SelectedIndexChanged += delegate { UpdateEnabled(); }; // Selection never calls Load.
             _refresh.Click += delegate { RefreshSolutions(false); };
@@ -134,6 +139,7 @@ namespace SC6000DualMonitor
                 string state = "";
                 try
                 {
+                    if (SolutionChanging != null) SolutionChanging();
                     var result = _controller.Switch(selected);
                     DisplayCurrent(result.CurrentPath);
                     if (result.VerificationPending)
@@ -164,7 +170,12 @@ namespace SC6000DualMonitor
                     state = "화면 갱신 실패: " + Describe(ex) + " (현재 Solution 표시를 확인하세요.)";
                     MessageBox.Show(this, state, "WILLB | Operation Interface", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
-                finally { SetBusy(false, state); }
+                finally
+                {
+                    try { if (SolutionChanged != null) SolutionChanged(); }
+                    catch (Exception ex) { Inspection.Failed(ex); }
+                    SetBusy(false, state);
+                }
             }));
         }
         private static string Describe(Exception error)
