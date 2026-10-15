@@ -39,8 +39,8 @@ namespace SC6000DualMonitor
             {
                 using (var font = new Font("Segoe UI", Math.Max(8, Height * .38f), FontStyle.Bold, GraphicsUnit.Pixel))
                 {
-                    logoWidth = Math.Min((int)(Width * .35), TextRenderer.MeasureText("WILLB", font).Width);
-                    TextRenderer.DrawText(e.Graphics, "WILLB", font, new Rectangle(pad, 0, logoWidth, Height), color,
+                    logoWidth = Math.Min((int)(Width * .35), TextRenderer.MeasureText("DAEKYUNG TECHNO", font).Width);
+                    TextRenderer.DrawText(e.Graphics, "DAEKYUNG TECHNO", font, new Rectangle(pad, 0, logoWidth, Height), color,
                         TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.NoPrefix);
                 }
             }

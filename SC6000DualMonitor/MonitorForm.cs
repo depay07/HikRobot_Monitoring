@@ -95,7 +95,7 @@ namespace SC6000DualMonitor
 
         private void LoadLogo()
         {
-            using (var stream = typeof(MonitorForm).Assembly.GetManifestResourceStream("SC6000DualMonitor.WillBLogo.png"))
+            using (var stream = typeof(MonitorForm).Assembly.GetManifestResourceStream("SC6000DualMonitor.DaekyungLogo.jpg"))
             using (var source = Image.FromStream(stream))
                 _logo = new Bitmap(source);
         }
