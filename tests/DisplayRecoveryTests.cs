@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Reflection;
 using System.Windows.Forms;
@@ -34,23 +34,6 @@ class DisplayRecoveryTests
             var ok = Activator.CreateInstance(eventType, new object[] { Enum.Parse(outcome, "Ok"), "OK" });
             inspection.GetType().GetMethod("OnResult", Flags).Invoke(inspection, new object[] { null, ok });
             Check(Field(inspection, "_lastError").ToString().Contains("ID 18"), "Success erased last error");
-            var ng = Activator.CreateInstance(eventType, new object[] { Enum.Parse(outcome, "Ng"), "NG\r\nMiddle_Size 에러\r\n홀 유무검사 에러\r\nBlob 에러" });
-            inspection.GetType().GetMethod("OnResult", Flags).Invoke(inspection, new object[] { null, ng });
-            inspection.GetType().GetMethod("RenderCounts", Flags).Invoke(inspection, null);
-            Check(((Label)Field(inspection, "_reasons")).Text.Contains("홀 유무검사 에러"), "Missing hole failure on banner");
-            using (var host = new Form { ClientSize = new System.Drawing.Size(900, 650) })
-            {
-                host.Controls.Add(pane); host.Show(); Application.DoEvents();
-                if (args.Length > 1) using (var bitmap = new System.Drawing.Bitmap(host.ClientSize.Width, host.ClientSize.Height))
-                {
-                    host.DrawToBitmap(bitmap, host.ClientRectangle); bitmap.Save(args[1]);
-                }
-                // Detach the pane before disposing the screenshot host.
-                host.Controls.Remove(pane);
-            }
-            inspection.GetType().GetMethod("OnResult", Flags).Invoke(inspection, new object[] { null, ok });
-            inspection.GetType().GetMethod("RenderCounts", Flags).Invoke(inspection, null);
-            Check(((Label)Field(inspection, "_reasons")).Text == "", "OK retained NG reasons");
             type.GetField("_busy", Flags).SetValue(pane, true);
             reload.Invoke(pane, null);
             Check(reloads == 1, "Busy reload must be ignored");

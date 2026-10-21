@@ -7,10 +7,6 @@ namespace SC6000DualMonitor
 {
     internal sealed class InspectionPane : UserControl
     {
-        public Control ResultBanner { get; private set; }
-        private readonly Label _verdict = new Label { AutoSize = true, Text = "검사 대기", Margin = new Padding(8, 2, 8, 0) };
-        private readonly Label _reasons = new Label { AutoSize = true, Margin = new Padding(8, 0, 8, 6) };
-        private string _displayedDetail;
         private readonly CameraSettings _settings;
         private readonly InspectionCounter _counter = new InspectionCounter();
         private readonly object _bindingGate = new object();
@@ -30,14 +26,6 @@ namespace SC6000DualMonitor
         public InspectionPane(CameraSettings settings)
         {
             _settings = settings;
-            var banner = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                FlowDirection = FlowDirection.TopDown, WrapContents = false, BackColor = Color.FromArgb(32, 37, 40), Margin = Padding.Empty,
-                MaximumSize = new Size(0, 220), AutoScroll = true };
-            _verdict.Font = new Font("Segoe UI", 26, FontStyle.Bold);
-            _reasons.Font = new Font("Segoe UI", 13, FontStyle.Bold);
-            banner.Controls.Add(_verdict); banner.Controls.Add(_reasons);
-            banner.SizeChanged += delegate { _reasons.MaximumSize = new Size(Math.Max(100, banner.ClientSize.Width - 36), 0); };
-            ResultBanner = banner;
             _store = new PartNumberStore(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WILLB", "SC6000Monitor", "Models"));
             Dock = DockStyle.Fill; Margin = Padding.Empty;
             BackColor = Color.FromArgb(238, 242, 246); ForeColor = Color.FromArgb(20, 40, 60);
@@ -142,14 +130,6 @@ namespace SC6000DualMonitor
         {
             lock (_bindingGate) _errorDetails.Enabled = _lastError != null;
             var count = _counter.Read();
-            if (_displayedDetail != count.LastResult)
-            {
-                _displayedDetail = count.LastResult;
-                _verdict.Text = count.LastOutcome == null ? "검사 대기" : count.LastOutcome == InspectionOutcome.Ok ? "OK" : count.LastOutcome == InspectionOutcome.Ng ? "NG" : "ERROR";
-                _verdict.ForeColor = _reasons.ForeColor = count.LastOutcome == InspectionOutcome.Ok ? Color.LimeGreen : count.LastOutcome == InspectionOutcome.Ng ? Color.Tomato : Color.Gold;
-                _reasons.Text = count.LastOutcome == InspectionOutcome.Ng ? count.LastResult.Substring(count.LastResult.StartsWith("NG\r\n", StringComparison.Ordinal) ? 4 : 0)
-                    : count.LastOutcome == InspectionOutcome.Error ? count.LastResult : "";
-            }
             long[] values = { count.Ok, count.Ng, count.Errors, count.Total };
             for (int i = 0; i < 4; i++) _counts[i].Text = values[i].ToString("N0");
             if (_session != null && count.Total > 0 && !_setupOpen) _state.Text = count.LastResult;
@@ -168,7 +148,7 @@ namespace SC6000DualMonitor
         }
         protected override void Dispose(bool disposing)
         {
-            if (disposing) { _displayTimer.Stop(); _displayTimer.Dispose(); Unbind(); ResultBanner.Dispose(); }
+            if (disposing) { _displayTimer.Stop(); _displayTimer.Dispose(); Unbind(); }
             base.Dispose(disposing);
         }
     }

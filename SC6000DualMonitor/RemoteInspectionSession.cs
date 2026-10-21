@@ -18,9 +18,6 @@ namespace SC6000DualMonitor
         private readonly string _cameraIp;
         public string TargetDescription { get { return _cameraIp + " | " + _procedure.Name + " / " + _condition.Name + " (ID " + _condition.ModuParams.ModuleID + ")"; } }
         private readonly IList<ConditionDefinition> _definitions;
-        private readonly Dictionary<uint, InspectionResultEventArgs> _conditionFrames = new Dictionary<uint, InspectionResultEventArgs>();
-        private readonly Queue<uint> _frameOrder = new Queue<uint>();
-        private ConditionDefinition[] _activeDefinitions = new ConditionDefinition[0];
         private readonly object _callbackGate = new object();
         private bool _disposed, _paused, _wasContinuous, _wasEnabled;
         public event EventHandler<InspectionResultEventArgs> ResultArrived;
@@ -60,57 +57,9 @@ namespace SC6000DualMonitor
                     "\r\nSDK에서 확인한 이름: " + string.Join(", ", candidates.Select(c => c.Name + " (ID " + c.ID + ")")));
             _condition = matches[0];
             ReadRanges();
-            _condition.ModuleResultCallBackArrived += OnConditionCompleted;
+            _condition.EnableResultCallback();
+            _procedure.EnableResultCallback();
             _procedure.ModuleResultCallBackArrived += OnProcedureCompleted;
-            try
-            {
-                _condition.EnableResultCallback();
-                _procedure.EnableResultCallback();
-            }
-            catch
-            {
-                _condition.ModuleResultCallBackArrived -= OnConditionCompleted;
-                _procedure.ModuleResultCallBackArrived -= OnProcedureCompleted;
-                throw;
-            }
-        }
-        private void OnConditionCompleted(object sender, EventArgs args)
-        {
-            var callback = args as VMControls.Interface.ValueEventArgs;
-            if (callback == null || !(callback.Value is ImvsSdkDefine.IMVS_MODULE_RESULT_INFO_LIST_EX_Data)) return;
-            var frame = (ImvsSdkDefine.IMVS_MODULE_RESULT_INFO_LIST_EX_Data)callback.Value;
-            if (frame.bIsSelfExecute != 0) return;
-            lock (_callbackGate)
-            {
-                if (_disposed || _paused) return;
-                InspectionResultEventArgs snapshot;
-                try
-                {
-                    // Copy only the callback's data; querying "latest" outputs here can mix two parts.
-                    var fields = frame.pInfo;
-                    var result = fields == null ? default(ImvsSdkDefine.IMVS_MODULE_RESULT_INFO_EX_Data) : fields.FirstOrDefault(f => (f.strParamName ?? "").Trim('%') == "StrResult");
-                    string text = result.pStringValue == null || result.pStringValue.Length != 1
-                        ? null : result.pStringValue[0].strValue;
-                    var outcome = InspectionCounter.Classify(frame.nErrorCode == 0, text);
-                    string detail = outcome == InspectionOutcome.Error ? "Condition Detection 결과 확인 불가" : text.Trim().ToUpperInvariant();
-                    if (outcome == InspectionOutcome.Ng)
-                    {
-                        var values = new Dictionary<string, int?>();
-                        foreach (var field in fields)
-                        {
-                            string name = (field.strParamName ?? "").Trim('%');
-                            if (values.ContainsKey(name)) values[name] = null;
-                            else values[name] = field.nValueNum == 1 && field.pIntValue != null && field.pIntValue.Length == 1 ? (int?)field.pIntValue[0] : null;
-                        }
-                        detail = "NG\r\n" + NgReasonReader.Read(_activeDefinitions, name => values.ContainsKey(name) ? values[name] : null);
-                    }
-                    snapshot = new InspectionResultEventArgs(outcome, detail);
-                }
-                catch (Exception ex) { snapshot = new InspectionResultEventArgs(InspectionOutcome.Error, "조건 결과 읽기 오류: " + ex.Message); }
-                if (!_conditionFrames.ContainsKey(frame.nExecuteCount)) _frameOrder.Enqueue(frame.nExecuteCount);
-                _conditionFrames[frame.nExecuteCount] = snapshot;
-                while (_frameOrder.Count > 32) _conditionFrames.Remove(_frameOrder.Dequeue());
-            }
         }
         private void OnProcedureCompleted(object sender, EventArgs args)
         {
@@ -120,12 +69,11 @@ namespace SC6000DualMonitor
                 InspectionResultEventArgs snapshot;
                 try
                 {
-                    var callback = args as VMControls.Interface.ValueEventArgs;
                     bool normal = _procedure.GetIsExecuteNormal() == 1;
-                    if (!normal) snapshot = new InspectionResultEventArgs(InspectionOutcome.Error, "Error: " + ReadExecutionError());
-                    else if (callback == null || !_conditionFrames.TryGetValue(callback.ExecuteCount, out snapshot))
-                        snapshot = new InspectionResultEventArgs(InspectionOutcome.Error, "동일 검사 회차의 Condition Detection 결과 수신 대기/누락");
-                    if (callback != null) _conditionFrames.Remove(callback.ExecuteCount);
+                    string text = normal ? _condition.ModuResult.StrResult : ReadExecutionError();
+                    InspectionOutcome outcome = InspectionCounter.Classify(normal, text);
+                    string detail = outcome == InspectionOutcome.Error ? "Error: " + (string.IsNullOrWhiteSpace(text) ? "판정 결과 없음" : text) : text.Trim().ToUpperInvariant();
+                    snapshot = new InspectionResultEventArgs(outcome, detail);
                 }
                 catch (Exception ex)
                 {
@@ -156,9 +104,7 @@ namespace SC6000DualMonitor
         }
         public IList<ConditionRange> ReadRanges()
         {
-            var ranges = ConditionParameterReader.Read(ReadParameter, _definitions);
-            _activeDefinitions = ranges.Select(r => r.Definition).ToArray();
-            return ranges;
+            return ConditionParameterReader.Read(ReadParameter, _definitions);
         }
         private string ReadParameter(string name)
         {
@@ -195,7 +141,7 @@ namespace SC6000DualMonitor
         {
             _wasContinuous = _procedure.ContinuousRunEnable;
             _wasEnabled = _procedure.IsEnabled;
-            lock (_callbackGate) { _paused = true; _conditionFrames.Clear(); _frameOrder.Clear(); }
+            lock (_callbackGate) _paused = true;
             try
             {
                 _procedure.ContinuousRunEnable = false;
@@ -227,7 +173,6 @@ namespace SC6000DualMonitor
         {
             lock (_callbackGate) { _disposed = true; ResultArrived = null; }
             _procedure.ModuleResultCallBackArrived -= OnProcedureCompleted;
-            _condition.ModuleResultCallBackArrived -= OnConditionCompleted;
             // Do not DisableModulesCallback: the embedded frontend also uses SDK callbacks.
         }
     }

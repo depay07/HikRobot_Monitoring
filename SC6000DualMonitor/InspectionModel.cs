@@ -69,7 +69,6 @@ namespace SC6000DualMonitor
     {
         public long Ok, Ng, Errors;
         public string LastResult;
-        public InspectionOutcome? LastOutcome;
         public long Total { get { return Ok + Ng + Errors; } }
     }
     internal sealed class InspectionCounter
@@ -77,17 +76,16 @@ namespace SC6000DualMonitor
         private readonly object _gate = new object();
         private long _ok, _ng, _errors;
         private string _last = "검사 대기";
-        private InspectionOutcome? _lastOutcome;
         public void Record(InspectionResultEventArgs result)
         {
             lock (_gate)
             {
                 switch (result.Outcome) { case InspectionOutcome.Ok: _ok++; break; case InspectionOutcome.Ng: _ng++; break; default: _errors++; break; }
-                _last = result.Detail; _lastOutcome = result.Outcome;
+                _last = result.Detail;
             }
         }
-        public void Reset() { lock (_gate) { _ok = _ng = _errors = 0; _last = "검사 대기"; _lastOutcome = null; } }
-        public CountSnapshot Read() { lock (_gate) return new CountSnapshot { Ok = _ok, Ng = _ng, Errors = _errors, LastResult = _last, LastOutcome = _lastOutcome }; }
+        public void Reset() { lock (_gate) { _ok = _ng = _errors = 0; _last = "검사 대기"; } }
+        public CountSnapshot Read() { lock (_gate) return new CountSnapshot { Ok = _ok, Ng = _ng, Errors = _errors, LastResult = _last }; }
         public static InspectionOutcome Classify(bool executionNormal, string result)
         {
             if (!executionNormal) return InspectionOutcome.Error;
