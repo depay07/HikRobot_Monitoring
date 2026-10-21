@@ -20,6 +20,8 @@ namespace SC6000DualMonitor
         private readonly PartNumberStore _store;
         private RemoteInspectionSession _session;
         private string _solutionPath;
+        private string _lastError;
+        private readonly Button _errorDetails = new Button { Text = "오류 상세", AutoSize = true, Enabled = false };
         private bool _setupOpen;
         public InspectionPane(CameraSettings settings)
         {
@@ -54,8 +56,16 @@ namespace SC6000DualMonitor
             }
             _reset.Dock = DockStyle.Fill; countRow.Controls.Add(_reset, 4, 0); countRow.SetRowSpan(_reset, 2);
             layout.Controls.Add(countRow, 0, 1);
-            var bottom = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty };
+            var bottom = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, Margin = Padding.Empty };
             bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            bottom.Controls.Add(_errorDetails, 2, 0);
+            _errorDetails.Click += delegate
+            {
+                string detail;
+                lock (_bindingGate) detail = _lastError;
+                if (detail != null) MessageBox.Show(this, detail, "최근 검사 오류 (" + (_settings == null ? "" : _settings.Ip) + ")", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            };
             bottom.Controls.Add(_setup, 0, 0); bottom.Controls.Add(_state, 1, 0); layout.Controls.Add(bottom, 0, 2);
             Controls.Add(layout);
             _part.Text = settings == null ? "" : settings.PartNumber;
@@ -99,13 +109,14 @@ namespace SC6000DualMonitor
             {
                 if (!ReferenceEquals(sender, _session)) return;
                 _counter.Record(result);
+                if (result.Outcome == InspectionOutcome.Error) _lastError = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "\r\n" + result.Detail;
             }
             // Do not queue one UI message per frame: the display timer paints snapshots.
         }
         public void Unbind()
         {
             RemoteInspectionSession previous;
-            lock (_bindingGate) { previous = _session; _session = null; _counter.Reset(); }
+            lock (_bindingGate) { previous = _session; _session = null; _counter.Reset(); _lastError = null; }
             // Outside the binding lock: Dispose can wait for an SDK callback holding its own lock.
             if (previous != null) { previous.ResultArrived -= OnResult; previous.Dispose(); }
             _setup.Enabled = _savePart.Enabled = false;
@@ -117,6 +128,7 @@ namespace SC6000DualMonitor
         { Unbind(); _state.Text = "Count / Set Up 연결 실패: " + error.Message; }
         private void RenderCounts()
         {
+            lock (_bindingGate) _errorDetails.Enabled = _lastError != null;
             var count = _counter.Read();
             long[] values = { count.Ok, count.Ng, count.Errors, count.Total };
             for (int i = 0; i < 4; i++) _counts[i].Text = values[i].ToString("N0");

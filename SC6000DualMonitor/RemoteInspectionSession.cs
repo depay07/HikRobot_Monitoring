@@ -70,7 +70,7 @@ namespace SC6000DualMonitor
                 try
                 {
                     bool normal = _procedure.GetIsExecuteNormal() == 1;
-                    string text = normal ? _condition.ModuResult.StrResult : "검사 흐름 실행 오류";
+                    string text = normal ? _condition.ModuResult.StrResult : ReadExecutionError();
                     InspectionOutcome outcome = InspectionCounter.Classify(normal, text);
                     string detail = outcome == InspectionOutcome.Error ? "Error: " + (string.IsNullOrWhiteSpace(text) ? "판정 결과 없음" : text) : text.Trim().ToUpperInvariant();
                     snapshot = new InspectionResultEventArgs(outcome, detail);
@@ -83,6 +83,24 @@ namespace SC6000DualMonitor
                 var handler = ResultArrived;
                 if (handler != null) handler(this, snapshot);
             }
+        }
+        private string ReadExecutionError()
+        {
+            const string summary = "검사 흐름 실행 오류";
+            try
+            {
+                var errors = _procedure.GetModuErrorInfoList();
+                if (errors == null) return summary + " (SDK 상세 정보 없음)";
+                var details = new List<string>();
+                foreach (var error in errors)
+                {
+                    if (error.nErrorCode == 0) continue;
+                    string name = string.IsNullOrWhiteSpace(error.strDisplayName) ? error.strModuleName : error.strDisplayName;
+                    details.Add(name + " (ID " + error.nModuleID + ") / 0x" + error.nErrorCode.ToString("X8"));
+                }
+                return summary + (details.Count == 0 ? " (SDK 상세 정보 없음)" : "\r\n" + string.Join("\r\n", details));
+            }
+            catch (Exception ex) { return summary + " / 상세 조회 실패: " + ex.Message; }
         }
         public IList<ConditionRange> ReadRanges()
         {

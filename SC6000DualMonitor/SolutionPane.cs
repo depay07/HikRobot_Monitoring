@@ -19,6 +19,7 @@ namespace SC6000DualMonitor
         private readonly ComboBox _choices = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, MinimumSize = Size.Empty };
         private readonly Button _refresh = new Button { Dock = DockStyle.Fill, Text = "새로고침", BackColor = SystemColors.Control, UseVisualStyleBackColor = true };
         private readonly Button _change = new Button { Dock = DockStyle.Fill, Text = "변경", BackColor = SystemColors.Control, UseVisualStyleBackColor = true };
+        private readonly Button _reload = new Button { Text = "화면 다시 읽기", AutoSize = true, ForeColor = Color.Black, BackColor = SystemColors.Control, UseVisualStyleBackColor = true };
         private readonly ToolTip _tip = new ToolTip();
 
         private bool _connected, _busy;
@@ -44,6 +45,7 @@ namespace SC6000DualMonitor
             footer.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
             footer.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             footer.Controls.Add(_state, 0, 0); footer.SetColumnSpan(_state, 4);
+            footer.Controls.Add(_reload, 0, 1); _reload.Anchor = AnchorStyles.Left;
             footer.Controls.Add(_choices, 1, 1); footer.Controls.Add(_refresh, 2, 1); footer.Controls.Add(_change, 3, 1);
             _refresh.ForeColor = _change.ForeColor = Color.Black;
             _refresh.AutoSize = _change.AutoSize = true;
@@ -58,6 +60,8 @@ namespace SC6000DualMonitor
             _choices.SelectedIndexChanged += delegate { UpdateEnabled(); }; // Selection never calls Load.
             _refresh.Click += delegate { RefreshSolutions(false); };
             _change.Click += delegate { ChangeSolution(); };
+            _reload.Click += delegate { ReloadDisplay(); };
+            _tip.SetToolTip(_reload, "현재 Operation Interface를 다시 읽습니다. Solution과 카운터는 유지됩니다.");
 
             UpdateEnabled();
         }
@@ -97,9 +101,27 @@ namespace SC6000DualMonitor
         private void UpdateEnabled()
         {
             var selected = _choices.SelectedItem as SolutionEntry;
-            _refresh.Enabled = _connected && !_busy;
+            _reload.Enabled = _refresh.Enabled = _connected && !_busy;
             _choices.Enabled = _connected && !_busy && _choices.Items.Count > 0;
             _change.Enabled = _connected && !_busy && selected != null && !SolutionPaths.Same(_currentPath, selected.Path);
+        }
+        private void ReloadDisplay()
+        {
+            if (!_connected || _busy) return;
+            SetBusy(true, "화면 다시 읽는 중...");
+            string state;
+            try
+            {
+                // Frontend only: never load the startup recipe, reset counts or restart acquisition.
+                _reloadFrontend();
+                state = "화면 다시 읽기 완료. 다음 검사 영상과 Errors를 확인하세요.";
+            }
+            catch (Exception ex)
+            {
+                state = "화면 다시 읽기 실패: " + Describe(ex);
+                MessageBox.Show(this, state, "화면 다시 읽기", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            SetBusy(false, state);
         }
         private void RefreshSolutions(bool initial)
         {
