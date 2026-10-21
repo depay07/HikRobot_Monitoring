@@ -30,10 +30,11 @@ namespace SC6000DualMonitor
             Dock = DockStyle.Fill; AutoScaleMode = AutoScaleMode.None;
             Font = new Font("Segoe UI", 9F);
             BackColor = Color.FromArgb(45, 52, 56); ForeColor = Color.White;
-            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Margin = Padding.Empty, Padding = Padding.Empty };
+            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Margin = Padding.Empty, Padding = Padding.Empty };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 116));
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             Content = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty };
@@ -55,7 +56,7 @@ namespace SC6000DualMonitor
             _refresh.MinimumSize = _refresh.GetPreferredSize(Size.Empty);
             _change.MinimumSize = _change.GetPreferredSize(Size.Empty);
             Inspection = new InspectionPane(settings);
-            layout.Controls.Add(_current, 0, 0); layout.Controls.Add(Inspection, 0, 1); layout.Controls.Add(Content, 0, 2); layout.Controls.Add(footer, 0, 3);
+            layout.Controls.Add(_current, 0, 0); layout.Controls.Add(Inspection, 0, 1); layout.Controls.Add(Inspection.ResultBanner, 0, 2); layout.Controls.Add(Content, 0, 3); layout.Controls.Add(footer, 0, 4);
             Controls.Add(layout);
             _choices.SelectedIndexChanged += delegate { UpdateEnabled(); }; // Selection never calls Load.
             _refresh.Click += delegate { RefreshSolutions(false); };

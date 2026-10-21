@@ -42,6 +42,7 @@ namespace SC6000DualMonitor
             _solutions.SolutionChanging += _solutions.Inspection.Unbind;
             _solutions.SolutionChanged += BindInspection;
             _solutions.Content.Controls.Add(_status);
+            _solutions.Content.SizeChanged += delegate { QueueFrontendResize(); };
             Controls.Add(_solutions);
             _layoutTimer.Tick += delegate { FitParent(); };
             Shown += delegate { FitParent(); _layoutTimer.Start(); BeginInvoke(new Action(Connect)); };
