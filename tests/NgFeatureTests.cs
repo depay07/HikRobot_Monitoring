@@ -105,6 +105,24 @@ class NgFeatureTests
                     typeof(Forms.Control).GetMethod("OnDoubleClick",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(picture,new object[]{EventArgs.Empty});
                     Check(Forms.Application.OpenForms.Cast<Forms.Form>().Any(f=>f is NgImageWindow),"double click opens image");
                     foreach(var popup in Forms.Application.OpenForms.Cast<Forms.Form>().OfType<NgImageWindow>().ToArray()) popup.Close();
+                    var mode = strip.Controls.OfType<Forms.ComboBox>().Single();
+                    Check(mode.Items.Count == 2 && mode.SelectedIndex == 0, "viewer mode is default");
+                    strip.ChangeMode = desired => false; mode.SelectedIndex = 1;
+                    Check(!strip.ReplayMode && mode.SelectedIndex == 0, "failed mode entry returns to viewer");
+                    strip.ConfigureOriginals(root, "Camera 1");
+                    strip.ChangeMode = desired => true; mode.SelectedIndex = 1;
+                    Check(strip.ReplayMode, "mode switches to originals");
+                    for(int i=0;i<30;i++) { Forms.Application.DoEvents(); Thread.Sleep(10); }
+                    var original = new NgRecord { ImagePath=a.ImagePath, Camera="Camera 1", IsOriginal=true, TimeUtc=DateTime.UtcNow, FileLength=new FileInfo(a.ImagePath).Length };
+                    strip.AddRecord(original); int replayClicks=0; strip.ReplayRequested += record => { Check(ReferenceEquals(record,original), "selected original routed intact"); replayClicks++; };
+                    picture=list.Controls[0].Controls.OfType<Forms.PictureBox>().Single();
+                    typeof(Forms.Control).GetMethod("OnClick",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(picture,new object[]{EventArgs.Empty});
+                    Check(replayClicks==1,"one click requests replay");
+                    strip.SetBusy(true);
+                    typeof(Forms.Control).GetMethod("OnClick",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(picture,new object[]{EventArgs.Empty});
+                    Check(replayClicks==1,"busy replay rejects duplicate clicks"); strip.SetBusy(false);
+                    typeof(Forms.Control).GetMethod("OnDoubleClick",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(picture,new object[]{EventArgs.Empty});
+                    Check(!Forms.Application.OpenForms.Cast<Forms.Form>().Any(f=>f is NgImageWindow),"replay does not show old screenshot as new result");
                     if(args.Length>0) using(var screenshot=new Bitmap(sample.Width,sample.Height)) { sample.DrawToBitmap(screenshot,sample.ClientRectangle); screenshot.Save(args[0]); }
                 }
             }

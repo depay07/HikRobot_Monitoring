@@ -22,7 +22,8 @@ namespace SC6000DualMonitor
         private readonly Button _reload = new Button { Text = "화면 다시 읽기", AutoSize = true, ForeColor = Color.Black, BackColor = SystemColors.Control, UseVisualStyleBackColor = true };
         private readonly ToolTip _tip = new ToolTip();
 
-        private bool _connected, _busy;
+        private bool _connected, _busy, _replayLocked;
+        public void SetReplayLock(bool locked) { _replayLocked = locked; Inspection.Enabled = !locked; UpdateEnabled(); }
         public bool IsBusy { get { return _busy; } }
         public void RefreshCurrent() { ReadCurrent(); }
         private string _currentPath;
@@ -103,9 +104,9 @@ namespace SC6000DualMonitor
         private void UpdateEnabled()
         {
             var selected = _choices.SelectedItem as SolutionEntry;
-            _reload.Enabled = _refresh.Enabled = _connected && !_busy;
-            _choices.Enabled = _connected && !_busy && _choices.Items.Count > 0;
-            _change.Enabled = _connected && !_busy && selected != null && !SolutionPaths.Same(_currentPath, selected.Path);
+            _reload.Enabled = _refresh.Enabled = _connected && !_busy && !_replayLocked;
+            _choices.Enabled = _connected && !_busy && !_replayLocked && _choices.Items.Count > 0;
+            _change.Enabled = _connected && !_busy && !_replayLocked && selected != null && !SolutionPaths.Same(_currentPath, selected.Path);
         }
         private void ReloadDisplay()
         {

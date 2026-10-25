@@ -19,6 +19,7 @@ namespace SC6000DualMonitor
         private readonly string _exePath;
         private readonly string _baseDir;
         private Image _logo;
+        private bool _closingViewers, _viewersClosed;
 
         public MonitorForm(IniConfig config, string exePath, string baseDir)
         {
@@ -135,10 +136,18 @@ namespace SC6000DualMonitor
             _watch.Start();
         }
 
-        protected override void OnFormClosing(FormClosingEventArgs e)
+        protected override async void OnFormClosing(FormClosingEventArgs e)
         {
             base.OnFormClosing(e);
             if (e.Cancel) return;
+            if (_viewersClosed)
+            {
+                foreach (var process in _viewers) if (process != null) process.Dispose();
+                _watch.Dispose(); if (_logo != null) _logo.Dispose(); return;
+            }
+            e.Cancel = true;
+            if (_closingViewers) return;
+            _closingViewers = true;
             _watch.Stop();
             foreach (Panel panel in _panels)
                 EnumChildWindows(panel.Handle, delegate(IntPtr window, IntPtr unused)
@@ -147,24 +156,20 @@ namespace SC6000DualMonitor
                     if (GetParent(window) == panel.Handle && _viewers.Any(p => p != null && p.Id == pid)) PostMessage(window, 0x0010, IntPtr.Zero, IntPtr.Zero);
                     return true;
                 }, IntPtr.Zero);
-            foreach (Process process in _viewers)
+            try
             {
-                if (process == null) continue;
-                try
+                DateTime deadline = DateTime.UtcNow.AddSeconds(10);
+                while (_viewers.Any(p => p != null && !p.HasExited) && DateTime.UtcNow < deadline)
+                    await System.Threading.Tasks.Task.Delay(100);
+                if (_viewers.Any(p => p != null && !p.HasExited))
                 {
-                    if (!process.HasExited)
-                    {
-                        // Only our own viewer processes; allow SDK disposal before termination.
-                        process.CloseMainWindow();
-                        if (!process.WaitForExit(1500)) process.Kill();
-                    }
+                    MessageBox.Show(this, "카메라 창이 아직 종료되지 않았습니다. 재검사를 완료하고 뷰어 모드로 복원한 뒤 다시 닫아주세요.\r\n설정 복원 중인 프로세스는 강제로 종료하지 않습니다.", "종료 대기");
+                    _watch.Start(); return;
                 }
-                catch (Exception ex) { Trace.WriteLine(ex); }
-                finally { process.Dispose(); }
+                _viewersClosed = true; Close();
             }
-            _watch.Dispose();
-            if (_logo != null) _logo.Dispose();
-
+            catch (Exception ex) { Trace.WriteLine(ex); _watch.Start(); }
+            finally { _closingViewers = false; }
         }
     }
 }

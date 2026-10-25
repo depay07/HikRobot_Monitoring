@@ -23,6 +23,17 @@ namespace SC6000DualMonitor
         public event EventHandler<InspectionResultEventArgs> ResultArrived;
         public event EventHandler<NgCaptureEventArgs> NgCaptureRequested;
         private readonly NgFrameMatcher _ngFrames = new NgFrameMatcher();
+        private readonly Dictionary<uint, string> _replayResults = new Dictionary<uint, string>();
+        private readonly HashSet<uint> _replayFrames = new HashSet<uint>();
+        public VmProcedure Procedure { get { return _procedure; } }
+        public void SuppressProductionResults(bool suppress)
+        {
+            lock (_callbackGate) { _paused = suppress; _ngFrames.Clear(); _replayResults.Clear(); }
+        }
+        public string ReplayVerdict(uint frame)
+        {
+            lock (_callbackGate) { string verdict; return _replayResults.TryGetValue(frame, out verdict) ? verdict : null; }
+        }
         public string CameraProcedureDescription { get { return _cameraIp + " | " + _procedure.Name; } }
         public IList<BlobModuleChoice> GetBlobModules()
         {
@@ -73,7 +84,7 @@ namespace SC6000DualMonitor
         {
             lock (_callbackGate)
             {
-                if (_disposed || _paused) return;
+                if (_disposed) return;
                 try
                 {
                     var callback = args as VMControls.Interface.ValueEventArgs;
@@ -82,6 +93,14 @@ namespace SC6000DualMonitor
                     if (frame.bIsSelfExecute != 0 || frame.pInfo == null) return;
                     var field = frame.pInfo.FirstOrDefault(f => (f.strParamName ?? "").Trim('%') == "StrResult");
                     string verdict = field.pStringValue != null && field.pStringValue.Length == 1 ? field.pStringValue[0].strValue : null;
+                    if (_paused)
+                    {
+                        RememberReplayFrame(frame.nExecuteCount);
+                        if (_replayResults.Count >= 32) _replayResults.Clear();
+                        _replayResults[frame.nExecuteCount] = frame.nErrorCode == 0 ? (verdict ?? "판정 결과 없음") : "모듈 오류 0x" + frame.nErrorCode.ToString("X8");
+                        return;
+                    }
+                    if (_replayFrames.Contains(frame.nExecuteCount)) return;
                     bool ng = frame.nErrorCode == 0 && string.Equals((verdict ?? "").Trim(), "NG", StringComparison.OrdinalIgnoreCase);
                     if (_ngFrames.Record(frame.nExecuteCount, ng, null)) RequestCapture(frame.nExecuteCount);
                 }
@@ -92,11 +111,19 @@ namespace SC6000DualMonitor
         {
             NgCaptureRequested?.Invoke(this, new NgCaptureEventArgs { Frame = frame, TimeUtc = DateTime.UtcNow, ProcedureGuid = _procedure.GUID });
         }
+        private void RememberReplayFrame(uint frame)
+        {
+            if (_replayFrames.Count >= 128) _replayFrames.Clear();
+            _replayFrames.Add(frame);
+        }
         private void OnProcedureCompleted(object sender, EventArgs args)
         {
             lock (_callbackGate)
             {
-                if (_disposed || _paused) return;
+                if (_disposed) return;
+                var incoming = args as VMControls.Interface.ValueEventArgs;
+                if (_paused) { if (incoming != null) RememberReplayFrame(incoming.ExecuteCount); return; }
+                if (incoming != null && _replayFrames.Contains(incoming.ExecuteCount)) return;
                 InspectionResultEventArgs snapshot;
                 try
                 {
