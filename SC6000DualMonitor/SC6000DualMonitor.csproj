@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
   <PropertyGroup>
@@ -42,6 +42,12 @@
     <Reference Include="System.Drawing" />
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Xml" />
+    <Reference Include="System.Xml.Linq" />
+    <Reference Include="WindowsBase" />
+    <Reference Include="PresentationCore" />
+    <Reference Include="PresentationFramework" />
+    <Reference Include="WindowsFormsIntegration" />
+    <Reference Include="Apps.UIHelper"><Private>False</Private></Reference>
     <Reference Include="IMVSBlobFindModuCs"><Private>False</Private></Reference>
     <Reference Include="IfModuleCs">
       <Private>False</Private>
@@ -65,6 +71,10 @@
   <ItemGroup>
     <Compile Include="Program.cs" />
     <Compile Include="ViewerForm.cs" />
+    <Compile Include="NgHistory.cs" />
+    <Compile Include="NgFilmStrip.cs" />
+    <Compile Include="NgFrameMatcher.cs" />
+    <Compile Include="FrontendCapture.cs" />
     <Compile Include="MonitorForm.cs" />
     <Compile Include="CameraLayout.cs" />
     <Compile Include="MonitorHeader.cs" />

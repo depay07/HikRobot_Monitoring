@@ -23,6 +23,8 @@ namespace SC6000DualMonitor
         private readonly ToolTip _tip = new ToolTip();
 
         private bool _connected, _busy;
+        public bool IsBusy { get { return _busy; } }
+        public void RefreshCurrent() { ReadCurrent(); }
         private string _currentPath;
         public SolutionPane(ISolutionSession session, Action reloadFrontend, CameraSettings settings = null)
         {

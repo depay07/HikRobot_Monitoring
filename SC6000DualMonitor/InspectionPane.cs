@@ -23,6 +23,7 @@ namespace SC6000DualMonitor
         private string _lastError;
         private readonly Button _errorDetails = new Button { Text = "오류 상세", AutoSize = true, Enabled = false };
         private bool _setupOpen;
+        public bool IsEditing { get { return _setupOpen; } }
         public InspectionPane(CameraSettings settings)
         {
             _settings = settings;

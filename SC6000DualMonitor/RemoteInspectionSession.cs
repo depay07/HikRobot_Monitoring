@@ -21,6 +21,8 @@ namespace SC6000DualMonitor
         private readonly object _callbackGate = new object();
         private bool _disposed, _paused, _wasContinuous, _wasEnabled;
         public event EventHandler<InspectionResultEventArgs> ResultArrived;
+        public event EventHandler<NgCaptureEventArgs> NgCaptureRequested;
+        private readonly NgFrameMatcher _ngFrames = new NgFrameMatcher();
         public string CameraProcedureDescription { get { return _cameraIp + " | " + _procedure.Name; } }
         public IList<BlobModuleChoice> GetBlobModules()
         {
@@ -57,9 +59,38 @@ namespace SC6000DualMonitor
                     "\r\nSDK에서 확인한 이름: " + string.Join(", ", candidates.Select(c => c.Name + " (ID " + c.ID + ")")));
             _condition = matches[0];
             ReadRanges();
-            _condition.EnableResultCallback();
-            _procedure.EnableResultCallback();
+            _condition.ModuleResultCallBackArrived += OnConditionResult;
             _procedure.ModuleResultCallBackArrived += OnProcedureCompleted;
+            try { _condition.EnableResultCallback(); _procedure.EnableResultCallback(); }
+            catch
+            {
+                _condition.ModuleResultCallBackArrived -= OnConditionResult;
+                _procedure.ModuleResultCallBackArrived -= OnProcedureCompleted;
+                throw;
+            }
+        }
+        private void OnConditionResult(object sender, EventArgs args)
+        {
+            lock (_callbackGate)
+            {
+                if (_disposed || _paused) return;
+                try
+                {
+                    var callback = args as VMControls.Interface.ValueEventArgs;
+                    if (callback == null || !(callback.Value is ImvsSdkDefine.IMVS_MODULE_RESULT_INFO_LIST_EX_Data)) return;
+                    var frame = (ImvsSdkDefine.IMVS_MODULE_RESULT_INFO_LIST_EX_Data)callback.Value;
+                    if (frame.bIsSelfExecute != 0 || frame.pInfo == null) return;
+                    var field = frame.pInfo.FirstOrDefault(f => (f.strParamName ?? "").Trim('%') == "StrResult");
+                    string verdict = field.pStringValue != null && field.pStringValue.Length == 1 ? field.pStringValue[0].strValue : null;
+                    bool ng = frame.nErrorCode == 0 && string.Equals((verdict ?? "").Trim(), "NG", StringComparison.OrdinalIgnoreCase);
+                    if (_ngFrames.Record(frame.nExecuteCount, ng, null)) RequestCapture(frame.nExecuteCount);
+                }
+                catch (Exception ex) { Trace.WriteLine("NG capture result: " + ex); }
+            }
+        }
+        private void RequestCapture(uint frame)
+        {
+            NgCaptureRequested?.Invoke(this, new NgCaptureEventArgs { Frame = frame, TimeUtc = DateTime.UtcNow, ProcedureGuid = _procedure.GUID });
         }
         private void OnProcedureCompleted(object sender, EventArgs args)
         {
@@ -70,6 +101,8 @@ namespace SC6000DualMonitor
                 try
                 {
                     bool normal = _procedure.GetIsExecuteNormal() == 1;
+                    var callback = args as VMControls.Interface.ValueEventArgs;
+                    if (callback != null && _ngFrames.Record(callback.ExecuteCount, null, normal)) RequestCapture(callback.ExecuteCount);
                     string text = normal ? _condition.ModuResult.StrResult : ReadExecutionError();
                     InspectionOutcome outcome = InspectionCounter.Classify(normal, text);
                     string detail = outcome == InspectionOutcome.Error ? "Error: " + (string.IsNullOrWhiteSpace(text) ? "판정 결과 없음" : text) : text.Trim().ToUpperInvariant();
@@ -141,7 +174,7 @@ namespace SC6000DualMonitor
         {
             _wasContinuous = _procedure.ContinuousRunEnable;
             _wasEnabled = _procedure.IsEnabled;
-            lock (_callbackGate) _paused = true;
+            lock (_callbackGate) { _paused = true; _ngFrames.Clear(); }
             try
             {
                 _procedure.ContinuousRunEnable = false;
@@ -171,8 +204,9 @@ namespace SC6000DualMonitor
         }
         public void Dispose()
         {
-            lock (_callbackGate) { _disposed = true; ResultArrived = null; }
+            lock (_callbackGate) { _disposed = true; ResultArrived = null; NgCaptureRequested = null; _ngFrames.Clear(); }
             _procedure.ModuleResultCallBackArrived -= OnProcedureCompleted;
+            _condition.ModuleResultCallBackArrived -= OnConditionResult;
             // Do not DisableModulesCallback: the embedded frontend also uses SDK callbacks.
         }
     }

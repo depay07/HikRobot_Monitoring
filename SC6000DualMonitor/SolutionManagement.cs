@@ -72,8 +72,7 @@ namespace SC6000DualMonitor
         {
             get
             {
-                string cached = VmSolution.Instance.SolutionPath;
-                return string.IsNullOrWhiteSpace(cached) ? ReadDevicePath() : cached;
+                return ReadDevicePath();
             }
         }
         public string VerifiedCurrentPath
