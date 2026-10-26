@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Drawing;
 using System.IO;
 using System.Threading.Tasks;
@@ -48,32 +48,52 @@ namespace SC6000DualMonitor
             base.OnLoad(e); if (_loaded) return; _loaded = true;
             try
             {
-                var records = await Task.Run(() => _store.LoadRecent(100));
+                var records = await Task.Run(() =>
+                {
+                    var result = new System.Collections.Generic.List<Tuple<NgRecord, byte[]>>();
+                    foreach (var record in _store.LoadRecent(100))
+                    {
+                        try { using (var stream = File.OpenRead(record.ImagePath)) result.Add(Tuple.Create(record, PrepareThumbnail(stream))); }
+                        catch (Exception ex) { System.Diagnostics.Trace.WriteLine("NG thumbnail: " + ex); result.Add(Tuple.Create(record, (byte[])null)); }
+                    }
+                    return result;
+                });
                 if (IsDisposed) return;
-                foreach (var record in records) AddRecord(record);
+                foreach (var record in records)
+                    if (record.Item2 != null) AddRecord(record.Item1, record.Item2);
+                    else SetStatus("일부 NG 기록의 이미지를 읽을 수 없습니다.");
             }
             catch (Exception ex) { if (!IsDisposed) SetStatus("NG 기록 읽기 실패: " + ex.Message); }
         }
         public void SetStatus(string text) { if (IsDisposed) return; _status.Text = text; _tip.SetToolTip(_status, text); }
+        // Full-size decoding/scaling belongs on a worker, not the camera display thread.
+        public static byte[] PrepareThumbnail(Stream stream)
+        {
+            using (var source = Image.FromStream(stream))
+            using (var thumbnail = new Bitmap(170, 115))
+            {
+                using (var g = Graphics.FromImage(thumbnail))
+                {
+                    g.Clear(Color.Black); double scale = Math.Min(170.0 / source.Width, 115.0 / source.Height);
+                    int w = Math.Max(1, (int)(source.Width * scale)), h = Math.Max(1, (int)(source.Height * scale));
+                    g.DrawImage(source, (170 - w) / 2, (115 - h) / 2, w, h);
+                }
+                using (var output = new MemoryStream())
+                { thumbnail.Save(output, System.Drawing.Imaging.ImageFormat.Png); return output.ToArray(); }
+            }
+        }
         public void AddRecord(NgRecord record)
         {
+            try { using (var stream = File.OpenRead(record.ImagePath)) AddRecord(record, PrepareThumbnail(stream)); }
+            catch (Exception ex) { SetStatus("NG 이미지 읽기 실패: " + ex.Message); }
+        }
+        public void AddRecord(NgRecord record, byte[] preview)
+        {
+            if (IsDisposed) return;
             foreach (Control item in _items.Controls) if (((NgRecord)item.Tag).ImagePath == record.ImagePath) return;
             Image thumbnail;
-            try
-            {
-                using (var stream = File.OpenRead(record.ImagePath))
-                using (var source = Image.FromStream(stream))
-                {
-                    thumbnail = new Bitmap(170, 115);
-                    using (var g = Graphics.FromImage(thumbnail))
-                    {
-                        g.Clear(Color.Black); double scale = Math.Min(170.0 / source.Width, 115.0 / source.Height);
-                        int w = (int)(source.Width * scale), h = (int)(source.Height * scale);
-                        g.DrawImage(source, (170 - w) / 2, (115 - h) / 2, w, h);
-                    }
-                }
-            }
-            catch (Exception ex) { SetStatus("NG 이미지 읽기 실패: " + ex.Message); return; }
+            using (var stream = new MemoryStream(preview, false))
+            using (var source = Image.FromStream(stream)) thumbnail = new Bitmap(source);
             var panel = new Panel { Width = Math.Max(100, _items.ClientSize.Width - 24), Height = 151, Tag = record, Margin = new Padding(4), BackColor = Color.FromArgb(65, 45, 45) };
             var picture = new PictureBox { Dock = DockStyle.Fill, Image = thumbnail, SizeMode = PictureBoxSizeMode.Zoom, Cursor = Cursors.Hand };
             var caption = new Label { Text = record.TimeUtc.ToLocalTime().ToString("MM-dd HH:mm:ss.fff") + "\r\n" + Path.GetFileName(record.Recipe ?? ""), Dock = DockStyle.Bottom, Height = 36, ForeColor = Color.White, TextAlign = ContentAlignment.MiddleCenter };
@@ -88,8 +108,13 @@ namespace SC6000DualMonitor
             _tip.SetToolTip(picture, record.Description + "\r\n더블클릭: 확대");
             int index = 0;
             foreach (Control item in _items.Controls) if (((NgRecord)item.Tag).TimeUtc > record.TimeUtc) index++;
-            _items.Controls.Add(panel); _items.Controls.SetChildIndex(panel, index);
-            while (_items.Controls.Count > 100) { var last = _items.Controls[_items.Controls.Count - 1]; _items.Controls.Remove(last); last.Dispose(); }
+            _items.SuspendLayout();
+            try
+            {
+                _items.Controls.Add(panel); _items.Controls.SetChildIndex(panel, index);
+                while (_items.Controls.Count > 100) { var last = _items.Controls[_items.Controls.Count - 1]; _items.Controls.Remove(last); last.Dispose(); }
+            }
+            finally { _items.ResumeLayout(true); }
             if (index == 0) _items.ScrollControlIntoView(panel);
         }
         protected override void Dispose(bool disposing) { if (disposing) _tip.Dispose(); base.Dispose(disposing); }

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Linq;
 using System.Drawing;
@@ -103,7 +103,13 @@ class NgFeatureTests
                 using(var strip=new NgFilmStrip(store))
                 using(var sample=new Forms.Form { ClientSize=new Size(250,650), StartPosition=Forms.FormStartPosition.Manual, Location=new System.Drawing.Point(-20000,-20000) })
                 {
-                    sample.Controls.Add(strip); sample.Show(); strip.AddRecord(a); strip.AddRecord(b); Forms.Application.DoEvents();
+                                        sample.Controls.Add(strip); sample.Show(); strip.AddRecord(a);
+                    var preview = System.Threading.Tasks.Task.Run(() => { using(var stream=File.OpenRead(b.ImagePath)) return NgFilmStrip.PrepareThumbnail(stream); }).GetAwaiter().GetResult();
+                    using(var stream=new MemoryStream(preview)) using(var thumb=new Bitmap(stream)) Check(thumb.Width==170 && thumb.Height==115,"worker prepares bounded thumbnail");
+                    File.Move(b.ImagePath,b.ImagePath+".hold");
+                    try { strip.AddRecord(b,preview); }
+                    finally { File.Move(b.ImagePath+".hold",b.ImagePath); }
+                    Forms.Application.DoEvents();
                     var list=(Forms.FlowLayoutPanel)typeof(NgFilmStrip).GetField("_items",BindingFlags.NonPublic|BindingFlags.Instance).GetValue(strip);
                     Check(((NgRecord)list.Controls[0].Tag).Frame==43,"newest thumbnail on top");
                     var picture=list.Controls[0].Controls.OfType<Forms.PictureBox>().Single();
