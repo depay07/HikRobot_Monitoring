@@ -22,6 +22,7 @@ namespace SC6000DualMonitor
         private int _generation;
         public bool ReplayMode { get; private set; }
         public Func<bool, bool> ChangeMode;
+        public Func<string> CaptureDiagnostics;
         public event Action<NgRecord> ReplayRequested;
         public void ConfigureOriginals(string root, string camera) { _rawRoot = root; _camera = camera; }
         public void SetBusy(bool busy) { _busy = busy; _items.Enabled = _mode.Enabled = _refresh.Enabled = !busy; }
@@ -35,6 +36,14 @@ namespace SC6000DualMonitor
             _store = store; Dock = DockStyle.Fill; BackColor = Color.FromArgb(33, 38, 42);
             var header = new Label { Text = "NG 기록 · 최신순", Dock = DockStyle.Top, Height = 30, ForeColor = Color.White, TextAlign = ContentAlignment.MiddleCenter };
             var folder = new Button { Text = "저장 폴더 열기", Dock = DockStyle.Bottom, Height = 28, BackColor = SystemColors.Control, ForeColor = Color.Black, UseVisualStyleBackColor = true };
+            var diagnose = new Button { Text = "저장 상태 확인", Dock = DockStyle.Bottom, Height = 28, BackColor = SystemColors.Control, ForeColor = Color.Black, UseVisualStyleBackColor = true };
+            diagnose.Click += delegate
+            {
+                try { MessageBox.Show(this, "카메라: " + _camera + "\r\n모드: " + (ReplayMode ? "재검사" : "뷰어") +
+                    "\r\n화면 저장 폴더: " + _store.DirectoryPath + "\r\nFTP 원본 폴더: " + (_rawRoot ?? "") +
+                    "\r\n현재 상태: " + _status.Text + "\r\n\r\n" + (CaptureDiagnostics == null ? "" : CaptureDiagnostics()), "NG 저장 상태"); }
+                catch (Exception ex) { MessageBox.Show(this, ex.Message, "저장 상태 조회 실패"); }
+            };
             folder.Click += delegate
             {
                 try
@@ -42,9 +51,15 @@ namespace SC6000DualMonitor
                     string directory = ReplayMode ? _rawRoot : _store.DirectoryPath;
                     if (string.IsNullOrWhiteSpace(directory)) throw new InvalidOperationException("RAW_IMAGE_ROOT를 설정하세요.");
                     if (!ReplayMode) Directory.CreateDirectory(directory);
-                    System.Diagnostics.Process.Start("explorer.exe", "\"" + directory + "\"");
+                    if (!Directory.Exists(directory)) throw new DirectoryNotFoundException(directory);
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = Path.GetFullPath(directory), UseShellExecute = true, Verb = "open" });
+                    SetStatus("저장 폴더: " + Path.GetFullPath(directory));
                 }
-                catch (Exception ex) { SetStatus("폴더 열기 실패: " + ex.Message); }
+                catch (Exception ex)
+                {
+                    string message = "폴더 열기 실패: " + ex.Message + "\r\n경로: " + (ReplayMode ? _rawRoot : _store.DirectoryPath);
+                    SetStatus(message); MessageBox.Show(this, message, "저장 폴더 열기 실패", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
             };
             _mode.Items.AddRange(new object[] { "뷰어 모드", "재검사 모드" }); _mode.SelectedIndex = 0;
             _mode.SelectedIndexChanged += delegate
@@ -57,7 +72,7 @@ namespace SC6000DualMonitor
             };
             _refresh.Click += delegate { ReloadRecords(); };
             _refreshTimer.Tick += delegate { if (ReplayMode && !_busy) ReloadRecords(); };
-            Controls.Add(_items); Controls.Add(_status); Controls.Add(folder); Controls.Add(_refresh); Controls.Add(_mode); Controls.Add(header);
+            Controls.Add(_items); Controls.Add(_status); Controls.Add(diagnose); Controls.Add(folder); Controls.Add(_refresh); Controls.Add(_mode); Controls.Add(header);
             _items.SizeChanged += delegate { foreach (Control c in _items.Controls) c.Width = Math.Max(100, _items.ClientSize.Width - 24); };
         }
         protected override void OnLoad(EventArgs e)

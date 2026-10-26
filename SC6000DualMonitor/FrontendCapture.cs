@@ -29,6 +29,12 @@ namespace SC6000DualMonitor
         public event Action Rendered;
         public string Availability { get; private set; }
         public bool HasViews { get { return _views.Count > 0; } }
+        public string Describe()
+        {
+            return "영상 컨트롤: " + _views.Count + "개\r\n" + string.Join("\r\n", _views.Select(v =>
+                "흐름 ID=" + v.OwnerField.GetValue(v.Control) + " / 표시=" + v.Control.IsVisible +
+                " / 현재 회차=" + v.FrameField.GetValue(v.Control) + " / 렌더 완료=" + (v.CompletedFrame.HasValue ? v.CompletedFrame.Value.ToString() : "없음")));
+        }
         public FrontendCapture(Forms.Control frontend)
         {
             foreach (var host in FormsChildren(frontend).OfType<ElementHost>())

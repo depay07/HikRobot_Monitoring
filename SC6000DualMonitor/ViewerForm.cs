@@ -45,6 +45,7 @@ namespace SC6000DualMonitor
         private ReplayControl _replay;
         private bool _replayBusy;
         private int _recipeEpoch;
+        private string _inspectionBindingError;
         private sealed class PendingCapture { public NgCaptureEventArgs Result; public string Recipe; public string LastError; }
 
 
@@ -56,6 +57,11 @@ namespace SC6000DualMonitor
             _film.ConfigureOriginals(settings.RawImageRoot, settings.Title);
             _film.ChangeMode = ChangeReplayMode;
             _film.ReplayRequested += RunReplay;
+            _film.CaptureDiagnostics = () => "IP: " + _settings.Ip + "\r\n레시피: " + (_boundRecipe ?? "확인 안 됨") +
+                "\r\n검사 연결 오류: " + (_inspectionBindingError ?? "없음") + "\r\n" +
+                (_captureSession == null ? "검사 결과 연결 없음" : _captureSession.CaptureDiagnostics) + "\r\n" +
+                (_capture == null ? "영상 캡처 연결 없음" : _capture.Describe()) +
+                "\r\n저장: " + _saved + " / 누락: " + _missed + " / 저장 대기: " + _pendingWrites;
             _parent = parent;
             AutoScaleMode = AutoScaleMode.None;
             Text = settings.Title;
@@ -97,6 +103,7 @@ namespace SC6000DualMonitor
 
         private void BindInspection()
         {
+            _inspectionBindingError = null;
             ResetCaptureBinding();
             RemoteInspectionSession inspection = null;
             string path = null;
@@ -112,6 +119,8 @@ namespace SC6000DualMonitor
             catch (Exception ex)
             {
                 if (inspection != null) inspection.Dispose();
+                _inspectionBindingError = ex.Message;
+                _film.SetStatus("NG 저장 연결 실패: " + ex.Message);
                 _solutions.Inspection.Failed(ex);
                 _solutions.Inspection.SetModelPath(path);
                 Trace.WriteLine(ex);
@@ -255,7 +264,8 @@ namespace SC6000DualMonitor
             if (IsDisposed || !_frontendLoaded || _frontend == null) return;
             _lastAttachAttempt = DateTime.UtcNow;
             DetachCapture();
-            try { _capture = new FrontendCapture(_frontend); _capture.Rendered += TryPendingCaptures; _film.SetStatus(_capture.Availability); }
+            try { _capture = new FrontendCapture(_frontend); _capture.Rendered += TryPendingCaptures;
+                _film.SetStatus(_inspectionBindingError == null ? _capture.Availability : "NG 저장 연결 실패: " + _inspectionBindingError); }
             catch (Exception ex) { _film.SetStatus("NG 캡처 연결 실패: " + ex.Message); }
         }
         private void DetachCapture()

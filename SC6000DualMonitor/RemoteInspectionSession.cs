@@ -25,6 +25,13 @@ namespace SC6000DualMonitor
         private readonly NgFrameMatcher _ngFrames = new NgFrameMatcher();
         private readonly Dictionary<uint, string> _replayResults = new Dictionary<uint, string>();
         private readonly HashSet<uint> _replayFrames = new HashSet<uint>();
+        private long _conditionCallbacks, _procedureCallbacks, _captureRequests;
+        public string CaptureDiagnostics
+        {
+            get { lock (_callbackGate) return "흐름: " + _procedureName + " / 조건: " + _conditionName +
+                "\r\n조건 콜백: " + _conditionCallbacks + " / 흐름 콜백: " + _procedureCallbacks +
+                " / NG 캡처 요청: " + _captureRequests + "\r\n결과 수신 제외 상태: " + _paused; }
+        }
         public VmProcedure Procedure { get { return _procedure; } }
         public void SuppressProductionResults(bool suppress)
         {
@@ -90,6 +97,7 @@ namespace SC6000DualMonitor
                     var callback = args as VMControls.Interface.ValueEventArgs;
                     if (callback == null || !(callback.Value is ImvsSdkDefine.IMVS_MODULE_RESULT_INFO_LIST_EX_Data)) return;
                     var frame = (ImvsSdkDefine.IMVS_MODULE_RESULT_INFO_LIST_EX_Data)callback.Value;
+                    _conditionCallbacks++;
                     if (frame.bIsSelfExecute != 0 || frame.pInfo == null) return;
                     var field = frame.pInfo.FirstOrDefault(f => (f.strParamName ?? "").Trim('%') == "StrResult");
                     string verdict = field.pStringValue != null && field.pStringValue.Length == 1 ? field.pStringValue[0].strValue : null;
@@ -109,6 +117,7 @@ namespace SC6000DualMonitor
         }
         private void RequestCapture(uint frame)
         {
+            _captureRequests++;
             NgCaptureRequested?.Invoke(this, new NgCaptureEventArgs { Frame = frame, TimeUtc = DateTime.UtcNow, ProcedureGuid = _procedure.GUID });
         }
         private void RememberReplayFrame(uint frame)
@@ -122,6 +131,7 @@ namespace SC6000DualMonitor
             {
                 if (_disposed) return;
                 var incoming = args as VMControls.Interface.ValueEventArgs;
+                _procedureCallbacks++;
                 if (_paused) { if (incoming != null) RememberReplayFrame(incoming.ExecuteCount); return; }
                 if (incoming != null && _replayFrames.Contains(incoming.ExecuteCount)) return;
                 InspectionResultEventArgs snapshot;
