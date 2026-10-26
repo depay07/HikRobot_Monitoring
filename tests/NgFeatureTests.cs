@@ -34,6 +34,7 @@ namespace FrontendUI.Design.Controls
         public SetImageEnd OnSetImageEnd { get; set; }
         public object ImageDataSource { get; set; } = new object();
         public ImageSource Source { get; set; } = new DrawingImage();
+        public void ChangeFirstColor(System.Windows.Media.Brush brush) { ((System.Windows.Shapes.Rectangle)((Canvas)Child).Children[0]).Fill = brush; }
         public MockImageView()
         {
             var canvas = new Canvas { Background = Brushes.DimGray };
@@ -48,7 +49,7 @@ namespace FrontendUI.Design.Controls
 class NgFeatureTests
 {
     static int checks;
-    static void Check(bool yes, string text) { if (!yes) throw new Exception(text); checks++; }
+    static void Check(bool yes, string text) { if (!yes) { Console.WriteLine("FAIL: " + text); throw new Exception(text); } checks++; }
     [STAThread] static void Main(string[] args)
     {
         string root = Path.Combine(Path.GetTempPath(), "sc6000-ng-test-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);
@@ -92,7 +93,11 @@ class NgFeatureTests
                 File.WriteAllText(Path.Combine(root,"zzz.xml"),"<broken>");
                 Check(store.LoadRecent(100).Count==2,"corrupt history skipped");
                 Check(store.LoadRecent(1).Single().Frame==43,"display bound");
-                view.Publish(44); Forms.Application.DoEvents(); Check(!capture.TryCapture(42,"procedure-test",out png,out message),"old frame cannot capture new image");
+                view.ImageView.ChangeFirstColor(Brushes.Yellow);
+                view.Publish(44); Forms.Application.DoEvents();
+                Check(capture.TryCapture(42,"procedure-test",out png,out message),"late NG result can retrieve frame after next trigger");
+                using(var stream = new MemoryStream(png)) using(var image = new Bitmap(stream))
+                    Check(image.GetPixel(50,50).R>240 && image.GetPixel(50,50).G<10,"late NG keeps its red graphics, never next frame yellow");
                 view.ImageView.Source=null; view.Publish(45); Check(!capture.TryCapture(45,"procedure-test",out png,out message),"blank checkerboard is not an NG photo");
                 using(var window=new NgImageWindow(a)) { window.Show(); Forms.Application.DoEvents(); Check(window.Visible,"separate history window"); window.Close(); }
                 using(var strip=new NgFilmStrip(store))
@@ -110,6 +115,32 @@ class NgFeatureTests
                     Check(capture.TryCapture(46,"procedure-test",out png,out message),"new live frame can be captured after closing history image");
                     if(args.Length>0) using(var screenshot=new Bitmap(sample.Width,sample.Height)) { sample.DrawToBitmap(screenshot,sample.ClientRectangle); screenshot.Save(args[0]); }
                 }
+                view.Publish(70); view.Publish(71); Forms.Application.DoEvents();
+                Check(!capture.TryCapture(70,"procedure-test",out png,out message),"never relabel a frame replaced before screenshot");
+                Check(capture.TryCapture(71,"procedure-test",out png,out message),"capture newest rendered frame in burst");
+                for(uint frame=100;frame<170;frame++) { view.Publish(frame); Forms.Application.DoEvents(); }
+                Check(!capture.TryCapture(42,"procedure-test",out png,out message),"old frame evicted at bounded capacity");
+                Check(capture.TryCapture(169,"procedure-test",out png,out message),"recent frame survives capacity eviction");
+                BitmapSource frozen;
+                Check(capture.TryGetSnapshot(169,"procedure-test",out frozen,out message) && frozen.IsFrozen,"snapshot is safe to hand to disk worker");
+                var encoded=System.Threading.Tasks.Task.Run(()=>FrontendCapture.EncodePng(frozen)).GetAwaiter().GetResult();
+                using(var stream=new MemoryStream(encoded)) using(var image=new Bitmap(stream))
+                    Check(image.GetPixel(50,50).G>240,"background PNG encoding preserves frame colors");
+            }
+        }
+        using(var form=new Forms.Form {ClientSize=new Size(800,500),StartPosition=Forms.FormStartPosition.Manual,Location=new System.Drawing.Point(-20000,-20000)})
+        using(var host=new ElementHost {Dock=Forms.DockStyle.Fill})
+        {
+            var grid=new Grid(); grid.RowDefinitions.Add(new RowDefinition()); grid.RowDefinitions.Add(new RowDefinition());
+            var first=new FrontendUI.Design.Controls.ImageControl(); var second=new FrontendUI.Design.Controls.ImageControl();
+            grid.Children.Add(first); grid.Children.Add(second); Grid.SetRow(second,1); host.Child=grid; form.Controls.Add(host); form.Show(); Forms.Application.DoEvents();
+            using(var capture=new FrontendCapture(host))
+            {
+                first.Publish(200); Forms.Application.DoEvents();
+                first.Publish(201); Forms.Application.DoEvents();
+                Check(!capture.TryCapture(200,"procedure-test",out png,out message),"multi-view waits for matching second view");
+                second.Publish(200); Forms.Application.DoEvents();
+                Check(capture.TryCapture(200,"procedure-test",out png,out message),"views from same frame combine despite staggered updates");
             }
         }
         Check(NgHistoryStore.DefaultDirectory("192.168.10.51")!=NgHistoryStore.DefaultDirectory("192.168.10.52"),"camera histories isolated");

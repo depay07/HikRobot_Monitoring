@@ -41,6 +41,7 @@ namespace SC6000DualMonitor
         private readonly List<PendingCapture> _pendingCaptures = new List<PendingCapture>();
         private readonly List<Task> _writes = new List<Task>();
         private int _saved, _missed, _pendingWrites;
+        private long _pendingWriteBytes;
         private bool _capturing, _recipeEventsSubscribed;
         private string _inspectionBindingError;
         private sealed class PendingCapture { public NgCaptureEventArgs Result; public string Recipe; public string LastError; }
@@ -303,26 +304,27 @@ namespace SC6000DualMonitor
                 DrainNgSignals();
                 foreach (var pending in _pendingCaptures.ToArray())
                 {
-                    byte[] png = null; string message = "NG 캡처 연결 대기"; bool success = false;
-                    try { success = _capture != null && _capture.TryCapture(pending.Result.Frame, pending.Result.ProcedureGuid, out png, out message); }
+                    System.Windows.Media.Imaging.BitmapSource snapshot = null; string message = "NG 캡처 연결 대기"; bool success = false;
+                    try { success = _capture != null && _capture.TryGetSnapshot(pending.Result.Frame, pending.Result.ProcedureGuid, out snapshot, out message); }
                     catch (Exception ex) { message = "캡처 실패: " + ex.Message; }
                     pending.LastError = message;
                     if (!success && DateTime.UtcNow - pending.Result.TimeUtc < TimeSpan.FromSeconds(3)) continue;
                     _pendingCaptures.Remove(pending);
                     if (!success) { _missed++; _film.SetStatus("캡처 누락 " + _missed + " / " + message); continue; }
-                    if (_pendingWrites >= 8) { _missed++; _film.SetStatus("NG 저장 대기 초과 / 누락 " + _missed); continue; }
+                    long bytes = (long)snapshot.PixelWidth * snapshot.PixelHeight * 4;
+                    if (_pendingWrites >= 8 || _pendingWriteBytes + bytes > 64L * 1024 * 1024) { _missed++; _film.SetStatus("NG 저장 대기 초과 / 누락 " + _missed); continue; }
                     var record = new NgRecord { Camera = _settings.Title + " (" + _settings.Ip + ")", Recipe = pending.Recipe,
                         TimeUtc = pending.Result.TimeUtc, Frame = pending.Result.Frame, ViewName = message };
-                    _pendingWrites++;
+                    _pendingWrites++; _pendingWriteBytes += bytes;
                     _writes.RemoveAll(t => t.IsCompleted);
                     _writes.Add(Task.Run(delegate
                     {
                         try
                         {
-                            _history.Save(png, record);
-                            PostUI(delegate { _pendingWrites--; _saved++; _film.AddRecord(record); _film.SetStatus("저장 " + _saved + " / 누락 " + _missed + " (이번 실행)"); });
+                            _history.Save(FrontendCapture.EncodePng(snapshot), record);
+                            PostUI(delegate { _pendingWrites--; _pendingWriteBytes -= bytes; _saved++; _film.AddRecord(record); _film.SetStatus("저장 " + _saved + " / 누락 " + _missed + " (이번 실행)"); });
                         }
-                        catch (Exception ex) { PostUI(delegate { _pendingWrites--; _missed++; _film.SetStatus("NG 저장 실패: " + ex.Message + " / 누락 " + _missed); }); }
+                        catch (Exception ex) { PostUI(delegate { _pendingWrites--; _pendingWriteBytes -= bytes; _missed++; _film.SetStatus("NG 저장 실패: " + ex.Message + " / 누락 " + _missed); }); }
                     }));
                 }
             }

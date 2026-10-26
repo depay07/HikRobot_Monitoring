@@ -25,13 +25,26 @@ namespace SC6000DualMonitor
             public uint? CompletedFrame;
         }
         private readonly List<View> _views = new List<View>();
+        private sealed class Snapshot
+        {
+            public View View;
+            public uint Frame;
+            public string Procedure;
+            public BitmapSource Image;
+            public long Bytes;
+        }
+        private readonly LinkedList<Snapshot> _snapshots = new LinkedList<Snapshot>();
+        private const long SnapshotBudget = 64L * 1024 * 1024;
+        private long _snapshotBytes, _evicted;
+        private string _snapshotError;
         private bool _disposed;
         public event Action Rendered;
         public string Availability { get; private set; }
         public bool HasViews { get { return _views.Count > 0; } }
         public string Describe()
         {
-            return "영상 컨트롤: " + _views.Count + "개\r\n" + string.Join("\r\n", _views.Select(v =>
+            return "화면 임시 보관: " + _snapshots.Count + "개 / " + (_snapshotBytes / 1024 / 1024) + "MB / 오래된 화면 제거: " + _evicted +
+                "\r\n최근 화면 확보 오류: " + (_snapshotError ?? "없음") + "\r\n영상 컨트롤: " + _views.Count + "개\r\n" + string.Join("\r\n", _views.Select(v =>
                 "흐름 ID=" + v.OwnerField.GetValue(v.Control) + " / 표시=" + v.Control.IsVisible +
                 " / 현재 회차=" + v.FrameField.GetValue(v.Control) + " / 렌더 완료=" + (v.CompletedFrame.HasValue ? v.CompletedFrame.Value.ToString() : "없음")));
         }
@@ -68,26 +81,66 @@ namespace SC6000DualMonitor
             var view = _views.FirstOrDefault(v => ReferenceEquals(v.Image, sender));
             if (view == null) return;
             if (view.ImageDataProperty.GetValue(view.Image, null) == null || view.SourceProperty.GetValue(view.Image, null) == null) { view.CompletedFrame = null; return; }
-            view.CompletedFrame = (uint)view.FrameField.GetValue(view.Control);
-            // Let WPF finish shape bindings/layout before rendering the screenshot.
-            view.Control.Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(delegate { if (!_disposed) Rendered?.Invoke(); }));
+            uint frame = (uint)view.FrameField.GetValue(view.Control);
+            string procedure = (string)view.OwnerField.GetValue(view.Control);
+            view.CompletedFrame = frame;
+            // Binding updates precede Render; the SDK schedules the next image at Background.
+            // Preserve this frame before waiting for NG/procedure callbacks or the WinForms timer.
+            view.Control.Dispatcher.BeginInvoke(DispatcherPriority.Render, new Action(delegate
+            {
+                if (_disposed) return;
+                try
+                {
+                    if (!Matches(view, frame, procedure)) return;
+                    view.Control.UpdateLayout();
+                    if (view.Control.ActualWidth < 2 || view.Control.ActualHeight < 2) return;
+                    var image = CaptureVisual(view.Control);
+                    if (!Matches(view, frame, procedure)) return;
+                    var previous = _snapshots.First;
+                    while (previous != null)
+                    {
+                        var next = previous.Next;
+                        if (previous.Value.View == view && previous.Value.Frame == frame)
+                        { _snapshotBytes -= previous.Value.Bytes; _snapshots.Remove(previous); }
+                        previous = next;
+                    }
+                    long bytes = (long)image.PixelWidth * image.PixelHeight * 4;
+                    _snapshots.AddLast(new Snapshot { View = view, Frame = frame, Procedure = procedure, Image = image, Bytes = bytes });
+                    _snapshotBytes += bytes;
+                    while (_snapshots.Count > 64 || _snapshotBytes > SnapshotBudget)
+                    { _snapshotBytes -= _snapshots.First.Value.Bytes; _snapshots.RemoveFirst(); _evicted++; }
+                    Rendered?.Invoke();
+                }
+                catch (Exception ex) { _snapshotError = ex.Message; System.Diagnostics.Trace.WriteLine(ex); }
+            }));
+        }
+        private static bool Matches(View view, uint frame, string procedure)
+        {
+            return view.Control.IsVisible && view.CompletedFrame == frame && (uint)view.FrameField.GetValue(view.Control) == frame &&
+                string.Equals((string)view.OwnerField.GetValue(view.Control), procedure, StringComparison.Ordinal) &&
+                view.ImageDataProperty.GetValue(view.Image, null) != null && view.SourceProperty.GetValue(view.Image, null) != null;
         }
         public bool TryCapture(uint frame, string procedureGuid, out byte[] png, out string message)
         {
             png = null;
+            BitmapSource bitmap;
+            if (!TryGetSnapshot(frame, procedureGuid, out bitmap, out message)) return false;
+            png = EncodePng(bitmap); return true;
+        }
+        public bool TryGetSnapshot(uint frame, string procedureGuid, out BitmapSource bitmap, out string message)
+        {
+            bitmap = null;
             var views = _views.Where(v => v.Control.IsVisible && string.Equals((string)v.OwnerField.GetValue(v.Control), procedureGuid, StringComparison.Ordinal)).ToList();
             if (views.Count == 0) { message = "해당 검사 흐름의 영상 화면을 찾을 수 없습니다."; return false; }
-            if (views.Any(v => v.CompletedFrame != frame || (uint)v.FrameField.GetValue(v.Control) != frame || v.ImageDataProperty.GetValue(v.Image, null) == null || v.SourceProperty.GetValue(v.Image, null) == null))
-            { message = "NG 회차와 화면 회차가 일치하지 않습니다."; return false; }
             var images = new List<BitmapSource>();
             foreach (var view in views)
             {
-                view.Control.UpdateLayout();
-                if (view.Control.ActualWidth < 2 || view.Control.ActualHeight < 2) { message = "영상 화면 크기를 확인할 수 없습니다."; return false; }
-                images.Add(CaptureVisual(view.Control));
+                var saved = _snapshots.FirstOrDefault(s => s.View == view && s.Frame == frame && s.Procedure == procedureGuid);
+                if (saved == null) { message = "NG 회차 " + frame + "의 보관 화면 없음 (화면 미수신 또는 보관 한도 초과)"; return false; }
+                images.Add(saved.Image);
             }
-            if (views.Any(v => v.CompletedFrame != frame || (uint)v.FrameField.GetValue(v.Control) != frame || v.ImageDataProperty.GetValue(v.Image, null) == null || v.SourceProperty.GetValue(v.Image, null) == null))
-            { message = "캡처 중 검사 화면이 변경되었습니다."; return false; }
+            message = views.Count == 1 ? "검사 화면" : "검사 화면 " + views.Count + "개";
+            if (images.Count == 1) { bitmap = images[0]; return true; }
             int width = images.Max(i => i.PixelWidth), height = images.Sum(i => i.PixelHeight);
             if ((long)width * height > 16000000) throw new InvalidOperationException("NG 캡처 화면이 너무 큽니다.");
             var drawing = new DrawingVisual();
@@ -97,13 +150,16 @@ namespace SC6000DualMonitor
                 int y = 0;
                 foreach (var image in images) { dc.DrawImage(image, new Rect(0, y, image.PixelWidth, image.PixelHeight)); y += image.PixelHeight; }
             }
-            var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32); bitmap.Render(drawing);
+            var combined = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32); combined.Render(drawing); combined.Freeze();
+            bitmap = combined; return true;
+        }
+        public static byte[] EncodePng(BitmapSource bitmap)
+        {
+            if (!bitmap.IsFrozen) throw new InvalidOperationException("고정된 캡처 화면만 저장할 수 있습니다.");
             using (var stream = new MemoryStream())
             {
-                var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap)); encoder.Save(stream); png = stream.ToArray();
+                var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap)); encoder.Save(stream); return stream.ToArray();
             }
-            message = views.Count == 1 ? "검사 화면" : "검사 화면 " + views.Count + "개";
-            return true;
         }
         internal static BitmapSource CaptureVisual(FrameworkElement view)
         {
@@ -126,6 +182,7 @@ namespace SC6000DualMonitor
             foreach (var view in _views)
                 view.EndProperty.SetValue(view.Image, Delegate.Remove((Delegate)view.EndProperty.GetValue(view.Image, null), view.Handler), null);
             _views.Clear();
+            _snapshots.Clear(); _snapshotBytes = 0;
         }
     }
 }
