@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -12,6 +12,7 @@ namespace SC6000DualMonitor
     internal sealed class RemoteInspectionSession : IInspectionSettingsSession, IInspectionTargetInfo, IDisposable
     {
         private readonly VmProcedure _procedure;
+        private readonly CurrentRecipeSave _recipeSave;
         private readonly IfModuleTool _condition;
         private readonly string _procedureName;
         private readonly string _conditionName;
@@ -49,6 +50,9 @@ namespace SC6000DualMonitor
             _procedureName = settings.ProcedureName;
             _conditionName = settings.ConditionModuleName;
             _cameraIp = settings.Ip;
+            var solutions = new RemoteSolutionSession(settings.SolutionDirectory, settings.SolutionPassword);
+            _recipeSave = new CurrentRecipeSave(() => solutions.CurrentPath,
+                path => VmSolution.SaveAs(path)); // null password preserves the SDK recipe password
             _definitions = ConditionDefinition.Parse(settings.ConditionItems);
             _procedure = VmSolution.Instance[_procedureName] as VmProcedure;
             if (_procedure == null) throw new InvalidOperationException("검사 흐름을 찾을 수 없습니다: " + _procedureName + "\r\nconfig.ini의 PROCEDURE를 확인하세요.");
@@ -182,6 +186,7 @@ namespace SC6000DualMonitor
 
         public void Pause()
         {
+            _recipeSave.Begin(); // Resolve before changing camera parameters or execution state.
             _wasContinuous = _procedure.ContinuousRunEnable;
             _wasEnabled = _procedure.IsEnabled;
             lock (_callbackGate) { _paused = true; _ngFrames.Clear(); }
@@ -201,7 +206,7 @@ namespace SC6000DualMonitor
             // IsEnabled is also a recipe setting: save the original enabled state,
             // not our temporary editing state. All intervals have been verified by this point.
             if (_wasEnabled) _procedure.IsEnabled = true;
-            try { VmSolution.Save(); }
+            try { _recipeSave.Save(); }
             finally { if (_wasEnabled) _procedure.IsEnabled = false; }
         }
         public void Resume()

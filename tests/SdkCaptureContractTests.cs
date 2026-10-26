@@ -53,6 +53,11 @@ class SdkCaptureContractTests
         Check(film.GetEvent("ReplayRequested")==null && film.GetProperty("ReplayMode")==null,"no replay events or mode");
         var viewer=app.GetType("SC6000DualMonitor.ViewerForm");
         Check(viewer.GetMethod("RunReplay",F)==null && viewer.GetMethod("ChangeReplayMode",F)==null,"no replay handlers in viewer");
+        var inspection = app.GetType("SC6000DualMonitor.RemoteInspectionSession");
+        var saveCalls = Calls(inspection.GetMethod("Save")).ToArray();
+        Check(saveCalls.Any(m => m.DeclaringType.Name == "CurrentRecipeSave" && m.Name == "Save"), "setup saves through current recipe guard");
+        Check(!saveCalls.Any(m => m.DeclaringType.FullName == "VM.Core.VmSolution" && m.Name == "Save"), "no pathless SDK save");
+        Check(Calls(app.GetType("SC6000DualMonitor.RemoteBlobSession").GetMethod("Save")).Any(m => m.DeclaringType == inspection && m.Name == "Save"), "BLOB uses the same guarded overwrite");
         Console.WriteLine("PASS: "+checks+" installed SDK contracts and startup IL checks (no camera calls)");
     }
 }

@@ -79,6 +79,7 @@
     <Compile Include="CameraLayout.cs" />
     <Compile Include="MonitorHeader.cs" />
     <Compile Include="SolutionManagement.cs" />
+    <Compile Include="CurrentRecipeSave.cs" />
     <Compile Include="SolutionPane.cs" />
     <Compile Include="InspectionModel.cs" />
     <Compile Include="BlobSettings.cs" />
