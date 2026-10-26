@@ -43,7 +43,7 @@ namespace SC6000DualMonitor
         private sealed class NgSignal { public object Session; public NgCaptureEventArgs Result; }
         private readonly List<PendingCapture> _pendingCaptures = new List<PendingCapture>();
         private readonly List<Task> _writes = new List<Task>();
-        private int _saved, _missed, _pendingWrites;
+        private int _saved, _missed, _pendingWrites, _displayed;
         private long _pendingWriteBytes;
         private bool _capturing, _recipeEventsSubscribed;
         private string _inspectionBindingError;
@@ -60,7 +60,7 @@ namespace SC6000DualMonitor
                 (_captureSession == null ? "검사 결과 연결 없음" : _captureSession.CaptureDiagnostics) + "\r\n" +
                 (_capture == null ? "영상 캡처 연결 없음" : _capture.Describe()) +
                 "\r\n저장: " + _saved + " / 누락: " + _missed + " / 저장 대기: " + _pendingWrites + " / 최대 대기: " + _peakWrites +
-                "\r\n최근 압축·저장·썸네일: " + _lastSaveMs.ToString("F0") + "ms" +
+                "\r\n최근 전체 이미지 저장: " + _lastSaveMs.ToString("F0") + "ms" +
                 "\r\nNG 수신→표시: 최근 " + _lastDisplayMs.ToString("F0") + "ms / 최대 " + _maxDisplayMs.ToString("F0") + "ms";
             _parent = parent;
             AutoScaleMode = AutoScaleMode.None;
@@ -323,35 +323,48 @@ namespace SC6000DualMonitor
                     if (_pendingWrites >= 8 || _pendingWriteBytes + bytes > 64L * 1024 * 1024) { _missed++; _film.SetStatus("NG 저장 대기 초과 / 누락 " + _missed); continue; }
                     var record = new NgRecord { Camera = _settings.Title + " (" + _settings.Ip + ")", Recipe = pending.Recipe,
                         TimeUtc = pending.Result.TimeUtc, Frame = pending.Result.Frame, ViewName = message };
+                    record.BeginSave();
                     _pendingWrites++; _pendingWriteBytes += bytes; _peakWrites = Math.Max(_peakWrites, _pendingWrites);
                     _writes.RemoveAll(t => t.IsCompleted);
                     _writes.Add(Task.Run(delegate
                     {
                         try
                         {
+                            byte[] preview = FrontendCapture.CreateThumbnail(snapshot);
+                            PostUI(delegate
+                            {
+                                _film.AddRecord(record, preview); _displayed++;
+                                _lastDisplayMs = Math.Max(0, (DateTime.UtcNow - record.TimeUtc).TotalMilliseconds);
+                                _maxDisplayMs = Math.Max(_maxDisplayMs, _lastDisplayMs);
+                                UpdateNgStatus();
+                            });
                             var work = Stopwatch.StartNew();
-                            byte[] png = FrontendCapture.EncodePng(snapshot);
-                            _history.Save(png, record);
-                            byte[] preview;
-                            using (var stream = new System.IO.MemoryStream(png, false)) preview = NgFilmStrip.PrepareThumbnail(stream);
+                            // Save the full colored screenshot at JPEG quality 95 after posting its preview.
+                            _history.Save(FrontendCapture.EncodeJpeg(snapshot), record, ".jpg");
+                            record.FinishSave();
                             double workMs = work.Elapsed.TotalMilliseconds;
                             PostUI(delegate
                             {
                                 _pendingWrites--; _pendingWriteBytes -= bytes; _saved++;
-                                _film.AddRecord(record, preview);
-                                _lastSaveMs = workMs;
-                                _lastDisplayMs = Math.Max(0, (DateTime.UtcNow - record.TimeUtc).TotalMilliseconds);
-                                _maxDisplayMs = Math.Max(_maxDisplayMs, _lastDisplayMs);
-                                _film.SetStatus("저장 " + _saved + " / 누락 " + _missed + " / 대기 " + _pendingWrites + "\r\n최근 표시 지연 " + _lastDisplayMs.ToString("F0") + "ms");
+                                _lastSaveMs = workMs; UpdateNgStatus();
                             });
                         }
-                        catch (Exception ex) { PostUI(delegate { _pendingWrites--; _pendingWriteBytes -= bytes; _missed++; _film.SetStatus("NG 저장 실패: " + ex.Message + " / 누락 " + _missed); }); }
+                        catch (Exception ex)
+                        {
+                            record.FinishSave(ex.Message);
+                            PostUI(delegate { _pendingWrites--; _pendingWriteBytes -= bytes; _missed++; _film.SetStatus("NG 저장 실패: " + ex.Message + " / 누락 " + _missed); });
+                        }
                     }));
                 }
             }
             finally { _capturing = false; }
         }
 
+        private void UpdateNgStatus()
+        {
+            _film.SetStatus("표시 " + _displayed + " / 저장 " + _saved + " / 누락 " + _missed + " / 대기 " + _pendingWrites +
+                "\r\n최근 썸네일 지연 " + _lastDisplayMs.ToString("F0") + "ms");
+        }
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
             if (_recipeEventsSubscribed)
@@ -361,7 +374,7 @@ namespace SC6000DualMonitor
             }
             _captureTimer.Stop(); _captureTimer.Dispose();
             ResetCaptureBinding(); DetachCapture();
-            // Disk tasks never wait for the UI thread. Finish already captured PNG writes before the viewer exits.
+            // Disk tasks never wait for the UI thread. Finish already captured image writes before the viewer exits.
             try { Task.WaitAll(_writes.ToArray()); } catch (Exception ex) { Trace.WriteLine(ex); }
             _layoutTimer.Stop();
             _layoutTimer.Dispose();

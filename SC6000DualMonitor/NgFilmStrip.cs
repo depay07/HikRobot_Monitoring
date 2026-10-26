@@ -90,7 +90,7 @@ namespace SC6000DualMonitor
         public void AddRecord(NgRecord record, byte[] preview)
         {
             if (IsDisposed) return;
-            foreach (Control item in _items.Controls) if (((NgRecord)item.Tag).ImagePath == record.ImagePath) return;
+            foreach (Control item in _items.Controls) if (ReferenceEquals(item.Tag, record) || (!string.IsNullOrEmpty(record.ImagePath) && ((NgRecord)item.Tag).ImagePath == record.ImagePath)) return;
             Image thumbnail;
             using (var stream = new MemoryStream(preview, false))
             using (var source = Image.FromStream(stream)) thumbnail = new Bitmap(source);
@@ -122,21 +122,25 @@ namespace SC6000DualMonitor
 
     internal sealed class NgImageWindow : Form
     {
-        private readonly Image _image;
+        private Image _image;
+        private readonly NgRecord _record;
+        private readonly TaskCompletionSource<bool> _closed = new TaskCompletionSource<bool>();
+        private readonly Label _loading = new Label { Dock = DockStyle.Fill, Text = "이미지를 준비하고 있습니다. 잠시 기다려 주세요.", ForeColor = Color.White, BackColor = Color.Black, TextAlign = ContentAlignment.MiddleCenter };
         private readonly PictureBox _picture = new PictureBox { SizeMode = PictureBoxSizeMode.Zoom, Dock = DockStyle.Fill, BackColor = Color.Black };
         private readonly Panel _scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.Black };
         private double _zoom = 1;
         public NgImageWindow(NgRecord record)
         {
             Text = "NG 저장 화면 — " + record.Camera; Width = 1100; Height = 800; StartPosition = FormStartPosition.CenterScreen;
-            using (var stream = File.OpenRead(record.ImagePath)) using (var source = Image.FromStream(stream)) _image = new Bitmap(source);
-            _picture.Image = _image; _scroll.Controls.Add(_picture);
+            _record = record;
+            _scroll.Controls.Add(_picture); _scroll.Controls.Add(_loading); _loading.BringToFront();
             var bar = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 34 };
             foreach (var text in new[] { "화면 맞춤", "1:1", "+", "−" })
             {
                 var button = new Button { Text = text, AutoSize = true };
                 button.Click += delegate
                 {
+                    if (_image == null) return;
                     if (text == "화면 맞춤") { _picture.Dock = DockStyle.Fill; _picture.SizeMode = PictureBoxSizeMode.Zoom; return; }
                     _zoom = text == "1:1" ? 1 : Math.Max(.1, Math.Min(8, _zoom * (text == "+" ? 1.25 : .8)));
                     _picture.Dock = DockStyle.None; _picture.SizeMode = PictureBoxSizeMode.StretchImage;
@@ -147,6 +151,31 @@ namespace SC6000DualMonitor
             Controls.Add(_scroll); Controls.Add(bar);
             Controls.Add(new Label { Text = record.Description, Dock = DockStyle.Top, Height = 65, Padding = new Padding(6), AutoEllipsis = true });
         }
-        protected override void Dispose(bool disposing) { if (disposing) { _picture.Image = null; _image.Dispose(); } base.Dispose(disposing); }
+        protected override async void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+            try
+            {
+                var ready = _record.Ready;
+                if (await Task.WhenAny(ready, _closed.Task) != ready || IsDisposed || Disposing) return;
+                if (!await ready) throw new IOException(_record.SaveError ?? "NG 이미지 저장에 실패했습니다.");
+                var image = await Task.Run(() =>
+                {
+                    using (var stream = File.OpenRead(_record.ImagePath))
+                    using (var source = Image.FromStream(stream)) return new Bitmap(source);
+                });
+                if (IsDisposed || Disposing) { image.Dispose(); return; }
+                _image = image; _picture.Image = image; _loading.Visible = false;
+            }
+            catch (Exception ex)
+            {
+                if (!IsDisposed && !Disposing) _loading.Text = "이미지를 열 수 없습니다.\r\n" + ex.Message;
+            }
+        }
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) { _closed.TrySetResult(true); _picture.Image = null; if (_image != null) { _image.Dispose(); _image = null; } }
+            base.Dispose(disposing);
+        }
     }
 }

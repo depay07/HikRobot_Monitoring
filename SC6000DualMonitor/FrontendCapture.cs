@@ -153,6 +153,23 @@ namespace SC6000DualMonitor
             var combined = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32); combined.Render(drawing); combined.Freeze();
             bitmap = combined; return true;
         }
+        public static byte[] CreateThumbnail(BitmapSource bitmap)
+        {
+            if (!bitmap.IsFrozen) throw new InvalidOperationException("고정된 캡처 화면만 처리할 수 있습니다.");
+            double scale = Math.Min(170.0 / bitmap.PixelWidth, 115.0 / bitmap.PixelHeight);
+            var thumbnail = new TransformedBitmap(bitmap, new ScaleTransform(scale, scale));
+            thumbnail.Freeze();
+            return EncodePng(thumbnail);
+        }
+        public static byte[] EncodeJpeg(BitmapSource bitmap)
+        {
+            if (!bitmap.IsFrozen) throw new InvalidOperationException("고정된 캡처 화면만 저장할 수 있습니다.");
+            using (var stream = new MemoryStream())
+            {
+                var rgb = new FormatConvertedBitmap(bitmap, PixelFormats.Bgr24, null, 0); rgb.Freeze();
+                var encoder = new JpegBitmapEncoder { QualityLevel = 95 }; encoder.Frames.Add(BitmapFrame.Create(rgb)); encoder.Save(stream); return stream.ToArray();
+            }
+        }
         public static byte[] EncodePng(BitmapSource bitmap)
         {
             if (!bitmap.IsFrozen) throw new InvalidOperationException("고정된 캡처 화면만 저장할 수 있습니다.");

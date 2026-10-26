@@ -11,7 +11,7 @@ using System.Windows.Media.Imaging;
 using SC6000DualMonitor;
 class NgRateTests
 {
-    class Done { public int Camera; public NgRecord Record; public byte[] Preview; public long Start; public Exception Error; }
+    class Done { public bool IsPreview; public int Camera; public NgRecord Record; public byte[] Preview; public long Start; public Exception Error; }
     [STAThread] static void Main(string[] args)
     {
         string root=Path.Combine(Path.GetTempPath(),"ng-rate-"+Guid.NewGuid().ToString("N"));
@@ -39,12 +39,12 @@ class NgRateTests
                         {
                             if(pending[cam]>=8 || (pending[cam]+1L)*width*height*4>64L*1024*1024) {drops[cam]++;continue;}
                             int camera=cam;var record=new NgRecord{Camera="Camera "+cam,TimeUtc=DateTime.UtcNow,Frame=(uint)frame,Recipe="test.solx"};
-                            long started=clock.ElapsedMilliseconds;pending[cam]++;peak[cam]=Math.Max(peak[cam],pending[cam]);
+                            record.BeginSave(); long started=clock.ElapsedMilliseconds;pending[cam]++;peak[cam]=Math.Max(peak[cam],pending[cam]);
                             tasks.Add(Task.Run(()=>
                             {
                                 var result=new Done{Camera=camera,Record=record,Start=started};
-                                try {var png=FrontendCapture.EncodePng(bitmap);stores[camera].Save(png,record);using(var stream=new MemoryStream(png,false))result.Preview=NgFilmStrip.PrepareThumbnail(stream);}
-                                catch(Exception e){result.Error=e;}
+                                try { done.Enqueue(new Done {IsPreview=true,Camera=camera,Record=record,Start=started,Preview=FrontendCapture.CreateThumbnail(bitmap)}); stores[camera].Save(FrontendCapture.EncodeJpeg(bitmap),record,".jpg"); record.FinishSave(); }
+                                catch(Exception e){result.Error=e;record.FinishSave(e.Message);}
                                 done.Enqueue(result);
                             }));
                         }
@@ -53,18 +53,25 @@ class NgRateTests
                     Done item;
                     while(done.TryDequeue(out item))
                     {
-                        pending[item.Camera]--;
-                        if(item.Error!=null) {errors++;Console.WriteLine(item.Error.Message);continue;}
-                        strips[item.Camera].AddRecord(item.Record,item.Preview);saved[item.Camera]++;
-                        latencies.Add(clock.ElapsedMilliseconds-item.Start);
+                        if (item.IsPreview)
+                        {
+                            strips[item.Camera].AddRecord(item.Record,item.Preview);
+                            latencies.Add(clock.ElapsedMilliseconds-item.Start);
+                        }
+                        else
+                        {
+                            pending[item.Camera]--;
+                            if(item.Error!=null) {errors++;Console.WriteLine(item.Error.Message);continue;}
+                            saved[item.Camera]++;
+                        }
                     }
                     Application.DoEvents();System.Threading.Thread.Sleep(1);
                 }
                 Task.WaitAll(tasks.ToArray());latencies.Sort();
-                Console.WriteLine(cameraCount+" cameras x 10 NG/s x 10s; 1280x900 random pixels; full PNG encoding + disk + preview UI (SDK/capture excluded)");
+                Console.WriteLine(cameraCount+" cameras x 10 NG/s x 10s; 1280x900 random pixels; preview first + quality-95 JPG disk + preview UI (SDK/capture excluded)");
                 Console.WriteLine("Saved="+saved[0]+","+saved[1]+"; drops="+drops[0]+","+drops[1]+"; errors="+errors+"; peak pending="+peak[0]+","+peak[1]);
-                Console.WriteLine("Latency ms: median="+latencies[latencies.Count/2]+" p95="+latencies[(int)(latencies.Count*.95)]+" max="+latencies[latencies.Count-1]+"; elapsed="+clock.ElapsedMilliseconds);
-                if(saved[0]!=100 || (cameraCount==2 && saved[1]!=100) || errors!=0)Environment.ExitCode=1;
+                Console.WriteLine("Thumbnail latency ms: median="+latencies[latencies.Count/2]+" p95="+latencies[(int)(latencies.Count*.95)]+" max="+latencies[latencies.Count-1]+"; elapsed="+clock.ElapsedMilliseconds);
+                if(latencies.Count!=100*cameraCount || saved[0]!=100 || (cameraCount==2 && saved[1]!=100) || errors!=0)Environment.ExitCode=1;
             }
         }
         finally {if(Directory.Exists(root))Directory.Delete(root,true);}

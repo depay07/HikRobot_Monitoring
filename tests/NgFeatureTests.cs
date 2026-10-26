@@ -103,7 +103,7 @@ class NgFeatureTests
                 using(var strip=new NgFilmStrip(store))
                 using(var sample=new Forms.Form { ClientSize=new Size(250,650), StartPosition=Forms.FormStartPosition.Manual, Location=new System.Drawing.Point(-20000,-20000) })
                 {
-                                        sample.Controls.Add(strip); sample.Show(); strip.AddRecord(a);
+                    sample.Controls.Add(strip); sample.Show(); strip.AddRecord(a);
                     var preview = System.Threading.Tasks.Task.Run(() => { using(var stream=File.OpenRead(b.ImagePath)) return NgFilmStrip.PrepareThumbnail(stream); }).GetAwaiter().GetResult();
                     using(var stream=new MemoryStream(preview)) using(var thumb=new Bitmap(stream)) Check(thumb.Width==170 && thumb.Height==115,"worker prepares bounded thumbnail");
                     File.Move(b.ImagePath,b.ImagePath+".hold");
@@ -132,6 +132,23 @@ class NgFeatureTests
                 var encoded=System.Threading.Tasks.Task.Run(()=>FrontendCapture.EncodePng(frozen)).GetAwaiter().GetResult();
                 using(var stream=new MemoryStream(encoded)) using(var image=new Bitmap(stream))
                     Check(image.GetPixel(50,50).G>240,"background PNG encoding preserves frame colors");
+                var jpeg=System.Threading.Tasks.Task.Run(()=>FrontendCapture.EncodeJpeg(frozen)).GetAwaiter().GetResult();
+                using(var stream=new MemoryStream(jpeg)) using(var image=new Bitmap(stream))
+                {
+                    double dpi = PresentationSource.FromVisual(view).CompositionTarget.TransformToDevice.M11;
+                    var yellow = image.GetPixel((int)(50*dpi),(int)(50*dpi));
+                    var green = image.GetPixel((int)(150*dpi),(int)(50*dpi));
+                    var blue = image.GetPixel((int)(250*dpi),(int)(50*dpi));
+                    Check(image.Width==frozen.PixelWidth && image.Height==frozen.PixelHeight,"JPEG retains full screenshot resolution");
+                    Check(yellow.R>230 && yellow.G>230 && yellow.B<25,"JPEG retains the yellow graphic from this frame");
+                    Check(green.G>230 && green.R<25,"JPEG retains green graphics");
+                    Check(blue.B>230 && blue.R<25,"JPEG retains blue graphics");
+                }
+                var jpgRecord=store.Save(jpeg,new NgRecord {TimeUtc=DateTime.UtcNow,Frame=169},".jpg");
+                Check(store.LoadRecent(100).Any(r=>r.ImagePath==jpgRecord.ImagePath),"JPEG history reloads alongside legacy PNG records");
+                var directPreview=System.Threading.Tasks.Task.Run(()=>FrontendCapture.CreateThumbnail(frozen)).GetAwaiter().GetResult();
+                using(var stream=new MemoryStream(directPreview)) using(var image=new Bitmap(stream))
+                    Check(image.Width<=170 && image.Height<=115,"direct snapshot thumbnail stays small without full image compression");
             }
         }
         using(var form=new Forms.Form {ClientSize=new Size(800,500),StartPosition=Forms.FormStartPosition.Manual,Location=new System.Drawing.Point(-20000,-20000)})
