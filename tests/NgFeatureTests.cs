@@ -62,7 +62,7 @@ class NgFeatureTests
         Check(!matcher.Record(1,true,null),"wait for completion"); Check(matcher.Record(1,null,true),"NG then completion");
         Check(!matcher.Record(1,true,true),"no duplicate"); Check(!matcher.Record(2,null,true),"wait for condition");
         Check(matcher.Record(2,true,null),"completion then NG"); Check(!matcher.Record(3,false,true),"OK excluded");
-        Check(!matcher.Record(4,true,false),"execution error excluded");
+        Check(matcher.Record(4,true,false) && matcher.Outcome(4)=="ERROR","execution error included");
         Check(!matcher.Record(5,true,null) && !matcher.Record(6,null,true),"never pair different frames");
         matcher.Clear(); Check(!matcher.Record(5,null,true),"clear on recipe switch");
         var store = new NgHistoryStore(root);

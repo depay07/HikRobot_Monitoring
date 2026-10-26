@@ -16,13 +16,14 @@ namespace SC6000DualMonitor
         public string ImagePath, Camera, Recipe, ViewName;
         public DateTime TimeUtc;
         public uint Frame;
+        public string Outcome = "NG", Detail;
         private TaskCompletionSource<bool> _ready;
         public string SaveError { get; private set; }
         public Task<bool> Ready { get { return _ready == null ? Task.FromResult(true) : _ready.Task; } }
         public void BeginSave() { _ready = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously); }
         public void FinishSave(string error = null) { SaveError = error; if (_ready != null) _ready.TrySetResult(error == null); }
-        public string Description { get { return Camera + " | " + TimeUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss.fff") +
-            "\r\n레시피: " + (string.IsNullOrEmpty(Recipe) ? "경로 확인 불가" : Recipe) + "\r\n검사 회차: " + Frame + " | " + ViewName; } }
+        public string Description { get { return Outcome + " | " + Camera + " | " + TimeUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss.fff") +
+            "\r\n레시피: " + (string.IsNullOrEmpty(Recipe) ? "경로 확인 불가" : Recipe) + "\r\n검사 회차: " + Frame + " | " + ViewName + (string.IsNullOrEmpty(Detail) ? "" : "\r\n" + Detail); } }
     }
 
     internal sealed class NgHistoryStore
@@ -49,6 +50,7 @@ namespace SC6000DualMonitor
                 new XDocument(new XElement("ng", new XAttribute("version", 1), new XAttribute("imageFormat", extension),
                     new XElement("time", record.TimeUtc.ToString("o", CultureInfo.InvariantCulture)),
                     new XElement("camera", record.Camera ?? ""), new XElement("recipe", record.Recipe ?? ""),
+                    new XElement("outcome", record.Outcome ?? "NG"), new XElement("detail", record.Detail ?? ""),
                     new XElement("view", record.ViewName ?? ""), new XElement("frame", record.Frame))).Save(manifest + ".tmp");
                 File.Move(manifest + ".tmp", manifest); // Completed records become visible only after the image is durable.
                 record.ImagePath = path;
@@ -79,7 +81,7 @@ namespace SC6000DualMonitor
                     if (extension != ".png" && extension != ".jpg") continue;
                     string image = Path.ChangeExtension(manifest, extension);
                     if (root == null || root.Name != "ng" || !File.Exists(image)) continue;
-                    records.Add(new NgRecord { ImagePath = image, Camera = (string)root.Element("camera"), Recipe = (string)root.Element("recipe"),
+                    records.Add(new NgRecord { Outcome = (string)root.Element("outcome") ?? "NG", Detail = (string)root.Element("detail"), ImagePath = image, Camera = (string)root.Element("camera"), Recipe = (string)root.Element("recipe"),
                         ViewName = (string)root.Element("view"), Frame = (uint)root.Element("frame"),
                         TimeUtc = DateTime.Parse((string)root.Element("time"), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind).ToUniversalTime() });
                 }

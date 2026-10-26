@@ -29,6 +29,7 @@ namespace SC6000DualMonitor
         private readonly Timer _captureTimer = new Timer { Interval = 50 };
         private readonly NgHistoryStore _history;
         private readonly NgFilmStrip _film;
+        private readonly InspectionDisplayHold _displayHold;
         private FrontendCapture _capture;
         private RemoteInspectionSession _captureSession;
         private string _boundRecipe;
@@ -47,7 +48,7 @@ namespace SC6000DualMonitor
         private long _pendingWriteBytes;
         private bool _capturing, _recipeEventsSubscribed;
         private string _inspectionBindingError;
-        private sealed class PendingCapture { public NgCaptureEventArgs Result; public string Recipe; public string LastError; }
+        private sealed class PendingCapture { public NgCaptureEventArgs Result; public string Recipe; public string LastError; public int HoldToken; }
 
 
         public ViewerForm(CameraSettings settings, IntPtr parent)
@@ -83,6 +84,7 @@ namespace SC6000DualMonitor
             _live.Margin = _film.Margin = Padding.Empty;
             _live.Controls.Add(_status); images.Controls.Add(_live, 0, 0); images.Controls.Add(_film, 1, 0);
             _solutions.Content.Controls.Add(images);
+            _displayHold = new InspectionDisplayHold(_live);
             _live.SizeChanged += delegate { QueueFrontendResize(); };
             _captureTimer.Tick += delegate { CaptureTick(); };
             Controls.Add(_solutions);
@@ -120,7 +122,7 @@ namespace SC6000DualMonitor
             {
                 if (inspection != null) inspection.Dispose();
                 _inspectionBindingError = ex.Message;
-                _film.SetStatus("NG 저장 연결 실패: " + ex.Message);
+                _film.SetStatus("NG/ERROR 저장 연결 실패: " + ex.Message);
                 _solutions.Inspection.Failed(ex);
                 _solutions.Inspection.SetModelPath(path);
                 Trace.WriteLine(ex);
@@ -258,8 +260,8 @@ namespace SC6000DualMonitor
             _lastAttachAttempt = DateTime.UtcNow;
             DetachCapture();
             try { _capture = new FrontendCapture(_frontend); _capture.Rendered += TryPendingCaptures;
-                _film.SetStatus(_inspectionBindingError == null ? _capture.Availability : "NG 저장 연결 실패: " + _inspectionBindingError); }
-            catch (Exception ex) { _film.SetStatus("NG 캡처 연결 실패: " + ex.Message); }
+                _film.SetStatus(_inspectionBindingError == null ? _capture.Availability : "NG/ERROR 저장 연결 실패: " + _inspectionBindingError); }
+            catch (Exception ex) { _film.SetStatus("NG/ERROR 캡처 연결 실패: " + ex.Message); }
         }
         private void DetachCapture()
         {
@@ -295,12 +297,13 @@ namespace SC6000DualMonitor
         {
             NgSignal[] signals; int dropped;
             lock (_signalGate) { signals = _signals.ToArray(); _signals.Clear(); dropped = _signalDrops; _signalDrops = 0; }
-            if (dropped > 0) { _missed += dropped; _film.SetStatus("NG 수신 대기 초과 / 누락 " + _missed); }
+            if (dropped > 0) { _missed += dropped; _film.SetStatus("NG/ERROR 수신 대기 초과 / 누락 " + _missed); }
             foreach (var signal in signals)
             {
                 if (!ReferenceEquals(signal.Session, _captureSession)) continue;
-                if (_pendingCaptures.Count >= 16) { _missed++; _film.SetStatus("NG 캡처 대기 초과 / 누락 " + _missed); continue; }
-                _pendingCaptures.Add(new PendingCapture { Result = signal.Result, Recipe = _boundRecipe });
+                int holdToken = _displayHold.Reserve(_settings.Title, signal.Result);
+                if (_pendingCaptures.Count >= 64) { _missed++; _film.SetStatus("NG/ERROR 캡처 대기 초과 / 누락 " + _missed); continue; }
+                _pendingCaptures.Add(new PendingCapture { Result = signal.Result, Recipe = _boundRecipe, HoldToken = holdToken });
             }
         }
         private void TryPendingCaptures()
@@ -312,17 +315,28 @@ namespace SC6000DualMonitor
                 DrainNgSignals();
                 foreach (var pending in _pendingCaptures.ToArray())
                 {
-                    System.Windows.Media.Imaging.BitmapSource snapshot = null; string message = "NG 캡처 연결 대기"; bool success = false;
+                    System.Windows.Media.Imaging.BitmapSource snapshot = null; string message = "NG/ERROR 캡처 연결 대기"; bool success = false;
                     try { success = _capture != null && _capture.TryGetSnapshot(pending.Result.Frame, pending.Result.ProcedureGuid, out snapshot, out message); }
                     catch (Exception ex) { message = "캡처 실패: " + ex.Message; }
                     pending.LastError = message;
                     if (!success && DateTime.UtcNow - pending.Result.TimeUtc < TimeSpan.FromSeconds(3)) continue;
                     _pendingCaptures.Remove(pending);
-                    if (!success) { _missed++; _film.SetStatus("캡처 누락 " + _missed + " / " + message); continue; }
+                    if (!success && pending.Result.Outcome == "ERROR")
+                    {
+                        snapshot = FrontendCapture.ErrorWithoutImage(pending.Result.Frame, pending.Result.Detail);
+                        message = "ERROR 이미지 미수신 안내 (검사 사진 없음)"; success = true;
+                    }
+                    if (!success)
+                    {
+                        _missed++; _film.SetStatus("캡처 누락 " + _missed + " / " + message);
+                        _displayHold.CaptureFailed(pending.HoldToken, "해당 회차의 화면을 확보하지 못했습니다."); continue;
+                    }
+                    try { _displayHold.SetImage(pending.HoldToken, snapshot, pending.Result.Outcome, pending.Result.Frame); }
+                    catch (Exception ex) { Trace.WriteLine(ex); _displayHold.CaptureFailed(pending.HoldToken, "고정 화면 표시 실패: " + ex.Message); }
                     long bytes = (long)snapshot.PixelWidth * snapshot.PixelHeight * 4;
-                    if (_pendingWrites >= 8 || _pendingWriteBytes + bytes > 64L * 1024 * 1024) { _missed++; _film.SetStatus("NG 저장 대기 초과 / 누락 " + _missed); continue; }
+                    if (_pendingWrites >= 8 || _pendingWriteBytes + bytes > 64L * 1024 * 1024) { _missed++; _film.SetStatus("NG/ERROR 저장 대기 초과 / 누락 " + _missed); continue; }
                     var record = new NgRecord { Camera = _settings.Title + " (" + _settings.Ip + ")", Recipe = pending.Recipe,
-                        TimeUtc = pending.Result.TimeUtc, Frame = pending.Result.Frame, ViewName = message };
+                        TimeUtc = pending.Result.TimeUtc, Frame = pending.Result.Frame, ViewName = message, Outcome = pending.Result.Outcome, Detail = pending.Result.Detail };
                     record.BeginSave();
                     _pendingWrites++; _pendingWriteBytes += bytes; _peakWrites = Math.Max(_peakWrites, _pendingWrites);
                     _writes.RemoveAll(t => t.IsCompleted);
@@ -352,7 +366,7 @@ namespace SC6000DualMonitor
                         catch (Exception ex)
                         {
                             record.FinishSave(ex.Message);
-                            PostUI(delegate { _pendingWrites--; _pendingWriteBytes -= bytes; _missed++; _film.SetStatus("NG 저장 실패: " + ex.Message + " / 누락 " + _missed); });
+                            PostUI(delegate { _pendingWrites--; _pendingWriteBytes -= bytes; _missed++; _film.SetStatus("NG/ERROR 저장 실패: " + ex.Message + " / 누락 " + _missed); });
                         }
                     }));
                 }
@@ -373,7 +387,7 @@ namespace SC6000DualMonitor
                 VmSolution.OnSolutionLoadEndCallBack -= OnRecipeLoaded;
             }
             _captureTimer.Stop(); _captureTimer.Dispose();
-            ResetCaptureBinding(); DetachCapture();
+            ResetCaptureBinding(); DetachCapture(); _displayHold.Dispose();
             // Disk tasks never wait for the UI thread. Finish already captured image writes before the viewer exits.
             try { Task.WaitAll(_writes.ToArray()); } catch (Exception ex) { Trace.WriteLine(ex); }
             _layoutTimer.Stop();

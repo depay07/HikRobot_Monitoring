@@ -9,7 +9,7 @@ namespace SC6000DualMonitor
     internal sealed class NgFilmStrip : UserControl
     {
         private readonly FlowLayoutPanel _items = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoScroll = true, FlowDirection = FlowDirection.TopDown, WrapContents = false };
-        private readonly Label _status = new Label { Dock = DockStyle.Bottom, Height = 56, Text = "NG 화면 대기", ForeColor = Color.White, Padding = new Padding(6) };
+        private readonly Label _status = new Label { Dock = DockStyle.Bottom, Height = 56, Text = "NG/ERROR 화면 대기", ForeColor = Color.White, Padding = new Padding(6) };
         private readonly NgHistoryStore _store;
         private readonly ToolTip _tip = new ToolTip();
         private bool _loaded;
@@ -17,13 +17,13 @@ namespace SC6000DualMonitor
         public NgFilmStrip(NgHistoryStore store)
         {
             _store = store; Dock = DockStyle.Fill; BackColor = Color.FromArgb(33, 38, 42);
-            var header = new Label { Text = "NG 기록 · 최신순", Dock = DockStyle.Top, Height = 30, ForeColor = Color.White, TextAlign = ContentAlignment.MiddleCenter };
+            var header = new Label { Text = "NG / ERROR · 최신순", Dock = DockStyle.Top, Height = 30, ForeColor = Color.White, TextAlign = ContentAlignment.MiddleCenter };
             var folder = new Button { Text = "저장 폴더 열기", Dock = DockStyle.Bottom, Height = 28, BackColor = SystemColors.Control, ForeColor = Color.Black, UseVisualStyleBackColor = true };
             var diagnose = new Button { Text = "저장 상태 확인", Dock = DockStyle.Bottom, Height = 28, BackColor = SystemColors.Control, ForeColor = Color.Black, UseVisualStyleBackColor = true };
             diagnose.Click += delegate
             {
                 try { MessageBox.Show(this, "화면 저장 폴더: " + _store.DirectoryPath + "\r\n현재 상태: " + _status.Text + "\r\n\r\n" +
-                    (CaptureDiagnostics == null ? "" : CaptureDiagnostics()), "NG 저장 상태"); }
+                    (CaptureDiagnostics == null ? "" : CaptureDiagnostics()), "NG/ERROR 저장 상태"); }
                 catch (Exception ex) { MessageBox.Show(this, ex.Message, "저장 상태 조회 실패"); }
             };
             folder.Click += delegate
@@ -63,7 +63,7 @@ namespace SC6000DualMonitor
                     if (record.Item2 != null) AddRecord(record.Item1, record.Item2);
                     else SetStatus("일부 NG 기록의 이미지를 읽을 수 없습니다.");
             }
-            catch (Exception ex) { if (!IsDisposed) SetStatus("NG 기록 읽기 실패: " + ex.Message); }
+            catch (Exception ex) { if (!IsDisposed) SetStatus("NG/ERROR 기록 읽기 실패: " + ex.Message); }
         }
         public void SetStatus(string text) { if (IsDisposed) return; _status.Text = text; _tip.SetToolTip(_status, text); }
         // Full-size decoding/scaling belongs on a worker, not the camera display thread.
@@ -96,7 +96,7 @@ namespace SC6000DualMonitor
             using (var source = Image.FromStream(stream)) thumbnail = new Bitmap(source);
             var panel = new Panel { Width = Math.Max(100, _items.ClientSize.Width - 24), Height = 151, Tag = record, Margin = new Padding(4), BackColor = Color.FromArgb(65, 45, 45) };
             var picture = new PictureBox { Dock = DockStyle.Fill, Image = thumbnail, SizeMode = PictureBoxSizeMode.Zoom, Cursor = Cursors.Hand };
-            var caption = new Label { Text = record.TimeUtc.ToLocalTime().ToString("MM-dd HH:mm:ss.fff") + "\r\n" + Path.GetFileName(record.Recipe ?? ""), Dock = DockStyle.Bottom, Height = 36, ForeColor = Color.White, TextAlign = ContentAlignment.MiddleCenter };
+            var caption = new Label { Text = record.Outcome + " · " + record.TimeUtc.ToLocalTime().ToString("MM-dd HH:mm:ss.fff") + "\r\n" + Path.GetFileName(record.Recipe ?? ""), Dock = DockStyle.Bottom, Height = 36, ForeColor = Color.White, TextAlign = ContentAlignment.MiddleCenter };
             EventHandler open = delegate
             {
                 try { new NgImageWindow(record).Show(); }
@@ -131,7 +131,7 @@ namespace SC6000DualMonitor
         private double _zoom = 1;
         public NgImageWindow(NgRecord record)
         {
-            Text = "NG 저장 화면 — " + record.Camera; Width = 1100; Height = 800; StartPosition = FormStartPosition.CenterScreen;
+            Text = record.Outcome + " 저장 화면 — " + record.Camera; Width = 1100; Height = 800; StartPosition = FormStartPosition.CenterScreen;
             _record = record;
             _scroll.Controls.Add(_picture); _scroll.Controls.Add(_loading); _loading.BringToFront();
             var bar = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 34 };

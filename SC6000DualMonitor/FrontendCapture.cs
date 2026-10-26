@@ -153,6 +153,19 @@ namespace SC6000DualMonitor
             var combined = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32); combined.Render(drawing); combined.Freeze();
             bitmap = combined; return true;
         }
+        public static BitmapSource ErrorWithoutImage(uint frame, string detail)
+        {
+            var drawing = new DrawingVisual();
+            using (var dc = drawing.RenderOpen())
+            {
+                dc.DrawRectangle(Brushes.Black, null, new Rect(0, 0, 960, 540));
+                var text = new FormattedText("ERROR · 검사 회차 " + frame + "\n\n이 회차의 카메라 이미지가 수신되지 않았습니다.\n다른 회차의 이미지를 대신 표시하지 않습니다.\n\n" + detail,
+                    System.Globalization.CultureInfo.CurrentCulture, FlowDirection.LeftToRight, new Typeface("Malgun Gothic"), 24, Brushes.White);
+                text.MaxTextWidth = 880; text.MaxTextHeight = 460;
+                dc.DrawText(text, new Point(40, 40));
+            }
+            var image = new RenderTargetBitmap(960, 540, 96, 96, PixelFormats.Pbgra32); image.Render(drawing); image.Freeze(); return image;
+        }
         public static byte[] CreateThumbnail(BitmapSource bitmap)
         {
             if (!bitmap.IsFrozen) throw new InvalidOperationException("고정된 캡처 화면만 처리할 수 있습니다.");

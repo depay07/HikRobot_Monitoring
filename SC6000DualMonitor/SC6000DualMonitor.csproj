@@ -74,6 +74,7 @@
     <Compile Include="NgHistory.cs" />
     <Compile Include="NgFilmStrip.cs" />
     <Compile Include="NgFrameMatcher.cs" />
+    <Compile Include="InspectionDisplayHold.cs" />
     <Compile Include="FrontendCapture.cs" />
     <Compile Include="MonitorForm.cs" />
     <Compile Include="CameraLayout.cs" />

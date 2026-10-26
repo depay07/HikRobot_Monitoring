@@ -91,19 +91,24 @@ namespace SC6000DualMonitor
                     if (callback == null || !(callback.Value is ImvsSdkDefine.IMVS_MODULE_RESULT_INFO_LIST_EX_Data)) return;
                     var frame = (ImvsSdkDefine.IMVS_MODULE_RESULT_INFO_LIST_EX_Data)callback.Value;
                     _conditionCallbacks++;
-                    if (frame.bIsSelfExecute != 0 || frame.pInfo == null) return;
-                    var field = frame.pInfo.FirstOrDefault(f => (f.strParamName ?? "").Trim('%') == "StrResult");
-                    string verdict = field.pStringValue != null && field.pStringValue.Length == 1 ? field.pStringValue[0].strValue : null;
+                    if (frame.bIsSelfExecute != 0) return;
+                    string verdict = null;
+                    if (frame.pInfo != null)
+                    {
+                        var field = frame.pInfo.FirstOrDefault(f => (f.strParamName ?? "").Trim('%') == "StrResult");
+                        verdict = field.pStringValue != null && field.pStringValue.Length == 1 ? field.pStringValue[0].strValue : null;
+                    }
                     bool ng = frame.nErrorCode == 0 && string.Equals((verdict ?? "").Trim(), "NG", StringComparison.OrdinalIgnoreCase);
-                    if (_ngFrames.Record(frame.nExecuteCount, ng, null)) RequestCapture(frame.nExecuteCount);
+                    bool error = frame.nErrorCode != 0 || (!ng && !string.Equals((verdict ?? "").Trim(), "OK", StringComparison.OrdinalIgnoreCase));
+                    if (_ngFrames.Record(frame.nExecuteCount, ng, null, error)) RequestCapture(frame.nExecuteCount);
                 }
                 catch (Exception ex) { Trace.WriteLine("NG capture result: " + ex); }
             }
         }
-        private void RequestCapture(uint frame)
+        private void RequestCapture(uint frame, string detail = null)
         {
             _captureRequests++;
-            NgCaptureRequested?.Invoke(this, new NgCaptureEventArgs { Frame = frame, TimeUtc = DateTime.UtcNow, ProcedureGuid = _procedure.GUID });
+            NgCaptureRequested?.Invoke(this, new NgCaptureEventArgs { Frame = frame, TimeUtc = DateTime.UtcNow, ProcedureGuid = _procedure.GUID, Outcome = _ngFrames.Outcome(frame), Detail = detail ?? (_ngFrames.Outcome(frame) == "ERROR" ? "Condition Detection 판정 오류" : "NG 판정") });
         }
         private void OnProcedureCompleted(object sender, EventArgs args)
         {
@@ -111,21 +116,24 @@ namespace SC6000DualMonitor
             {
                 if (_disposed || _paused) return;
                 InspectionResultEventArgs snapshot;
+                var callback = args as VMControls.Interface.ValueEventArgs;
                 _procedureCallbacks++;
                 try
                 {
                     bool normal = _procedure.GetIsExecuteNormal() == 1;
-                    var callback = args as VMControls.Interface.ValueEventArgs;
-                    if (callback != null && _ngFrames.Record(callback.ExecuteCount, null, normal)) RequestCapture(callback.ExecuteCount);
+
                     string text = normal ? _condition.ModuResult.StrResult : ReadExecutionError();
                     InspectionOutcome outcome = InspectionCounter.Classify(normal, text);
                     string detail = outcome == InspectionOutcome.Error ? "Error: " + (string.IsNullOrWhiteSpace(text) ? "판정 결과 없음" : text) : text.Trim().ToUpperInvariant();
                     snapshot = new InspectionResultEventArgs(outcome, detail);
+                    if (callback != null && _ngFrames.Record(callback.ExecuteCount, null, normal, outcome == InspectionOutcome.Error))
+                        RequestCapture(callback.ExecuteCount, outcome == InspectionOutcome.Error ? detail : null);
                 }
                 catch (Exception ex)
                 {
                     Trace.WriteLine(ex);
                     snapshot = new InspectionResultEventArgs(InspectionOutcome.Error, "결과 읽기 오류: " + ex.Message);
+                    if (callback != null && _ngFrames.Record(callback.ExecuteCount, null, false)) RequestCapture(callback.ExecuteCount, snapshot.Detail);
                 }
                 var handler = ResultArrived;
                 if (handler != null) handler(this, snapshot);
