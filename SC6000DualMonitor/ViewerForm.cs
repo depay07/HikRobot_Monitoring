@@ -42,9 +42,6 @@ namespace SC6000DualMonitor
         private readonly List<Task> _writes = new List<Task>();
         private int _saved, _missed, _pendingWrites;
         private bool _capturing, _recipeEventsSubscribed;
-        private ReplayControl _replay;
-        private bool _replayBusy;
-        private int _recipeEpoch;
         private string _inspectionBindingError;
         private sealed class PendingCapture { public NgCaptureEventArgs Result; public string Recipe; public string LastError; }
 
@@ -54,10 +51,7 @@ namespace SC6000DualMonitor
             _settings = settings;
             _history = new NgHistoryStore(NgHistoryStore.DefaultDirectory(settings.Ip));
             _film = new NgFilmStrip(_history);
-            _film.ConfigureOriginals(settings.RawImageRoot, settings.Title);
-            _film.ChangeMode = ChangeReplayMode;
-            _film.ReplayRequested += RunReplay;
-            _film.CaptureDiagnostics = () => "IP: " + _settings.Ip + "\r\n레시피: " + (_boundRecipe ?? "확인 안 됨") +
+            _film.CaptureDiagnostics = () => "카메라: " + _settings.Title + " / IP: " + _settings.Ip + "\r\n레시피: " + (_boundRecipe ?? "확인 안 됨") +
                 "\r\n검사 연결 오류: " + (_inspectionBindingError ?? "없음") + "\r\n" +
                 (_captureSession == null ? "검사 결과 연결 없음" : _captureSession.CaptureDiagnostics) + "\r\n" +
                 (_capture == null ? "영상 캡처 연결 없음" : _capture.Describe()) +
@@ -233,20 +227,13 @@ namespace SC6000DualMonitor
             }
         }
 
-        private void OnRecipeLoading(object sender, EventArgs args) { System.Threading.Interlocked.Increment(ref _recipeEpoch); _recipeLoading = true; }
+        private void OnRecipeLoading(object sender, EventArgs args) { _recipeLoading = true; }
         private void OnRecipeLoaded(object sender, EventArgs args) { _recipeLoading = false; _recipeRefreshPending = true; }
         private void CaptureTick()
         {
-            if (_replayBusy) return;
             if (_recipeLoading) return;
             if (_recipeRefreshPending)
             {
-                if (_replay != null)
-                {
-                    // Old module handles no longer belong to the current recipe. Never restore them into the new one.
-                    _replay = null; SetReplayLock(false); _film.ResetMode();
-                    MessageBox.Show(this, "외부에서 레시피가 변경되어 재검사 모드를 종료했습니다. 카메라의 실행 상태를 확인하세요.", "레시피 변경");
-                }
                 if (_solutions.IsBusy || _solutions.Inspection.IsEditing) return;
                 _recipeRefreshPending = false;
                 try
@@ -309,7 +296,6 @@ namespace SC6000DualMonitor
         }
         private void TryPendingCaptures()
         {
-            if (_replay != null || _replayBusy) return;
             if (_capturing || _recipeLoading || _recipeRefreshPending || IsDisposed) return;
             _capturing = true;
             try
@@ -341,100 +327,6 @@ namespace SC6000DualMonitor
                 }
             }
             finally { _capturing = false; }
-        }
-
-        private void SetReplayLock(bool locked)
-        {
-            _solutions.SetReplayLock(locked);
-            if (_frontend != null) _frontend.Enabled = !locked;
-        }
-        private bool ChangeReplayMode(bool replay)
-        {
-            if (_replayBusy) return false;
-            _replayBusy = true; _film.SetBusy(true);
-            try
-            {
-                if (!replay)
-                {
-                    if (_replay != null) _replay.Exit(() => _captureSession?.SuppressProductionResults(false));
-                    _replay = null; _captureSession?.SuppressProductionResults(false); SetReplayLock(false);
-                    return true;
-                }
-                if (!_connected || _captureSession == null || _solutions.IsBusy || _solutions.Inspection.IsEditing || _recipeLoading || _recipeRefreshPending)
-                    throw new InvalidOperationException("카메라와 현재 레시피가 연결된 후 사용하세요.");
-                if (string.IsNullOrWhiteSpace(_settings.RawImageRoot) || !System.IO.Directory.Exists(_settings.RawImageRoot))
-                    throw new InvalidOperationException("config.ini의 RAW_IMAGE_ROOT에 이 카메라의 원본 저장 폴더를 지정하세요.");
-                var session = _captureSession; int epoch = _recipeEpoch;
-                string path = _remoteSolutions.VerifiedCurrentPath;
-                if (string.IsNullOrWhiteSpace(path)) throw new InvalidOperationException("현재 레시피 경로를 확인할 수 없습니다.");
-                var device = new RemoteReplayDevice(session.Procedure, _settings.ReplayImageModule,
-                    () => epoch == _recipeEpoch && !_recipeLoading && !_recipeRefreshPending && ReferenceEquals(session, _captureSession)
-                        && SolutionPaths.Same(path, _remoteSolutions.VerifiedCurrentPath));
-                if (MessageBox.Show(this, "생산 트리거를 정지한 후 사용하세요.\r\n재검사는 현재 레시피 전체를 실행하므로 IO·통신 출력도 발생할 수 있습니다.\r\n뷰어의 생산 카운터와 NG 저장에는 반영하지 않습니다.\r\n\r\n재검사 모드로 전환하시겠습니까?", "재검사 모드", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) return false;
-                session.SuppressProductionResults(true);
-                _pendingCaptures.Clear(); lock (_signalGate) { _signals.Clear(); _signalDrops = 0; }
-                _replay = new ReplayControl(device); SetReplayLock(true);
-                try { _replay.Enter(); }
-                catch
-                {
-                    try { _replay.Exit(); _replay = null; session.SuppressProductionResults(false); SetReplayLock(false); }
-                    catch (Exception restore) { _film.SetStatus("실행 상태 복원 실패: " + restore.Message); }
-                    throw;
-                }
-                return true;
-            }
-            catch (Exception ex)
-            {
-                if (_replay != null && _replay.Active) _captureSession?.SuppressProductionResults(true);
-                _film.SetStatus("모드 전환 실패: " + ex.Message);
-                MessageBox.Show(this, ex.Message, "모드 전환 실패", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                // An enter failure with failed rollback must still expose the viewer-mode recovery action.
-                return replay && _replay != null && _replay.Active;
-            }
-            finally { _replayBusy = false; if (!IsDisposed) _film.SetBusy(false); }
-        }
-        private async void RunReplay(NgRecord original)
-        {
-            if (_replayBusy || _replay == null || !_replay.Active) return;
-            _replayBusy = true; _film.SetBusy(true);
-            int epoch = _recipeEpoch;
-            try
-            {
-                _film.SetStatus("원본 읽는 중: " + System.IO.Path.GetFileName(original.ImagePath));
-                byte[] input = await Task.Run(() => FtpOriginals.ReadStable(original));
-                if (epoch != _recipeEpoch || _recipeLoading || _recipeRefreshPending) throw new InvalidOperationException("레시피가 변경되었습니다.");
-                _film.SetStatus("현재 레시피로 재검사 중...");
-                uint frame = _replay.Execute(input);
-                string recipe = _remoteSolutions.VerifiedCurrentPath;
-                byte[] png = null; string message = "재검사 화면 대기"; string verdict = null;
-                DateTime deadline = DateTime.UtcNow.AddSeconds(5);
-                do
-                {
-                    await Task.Delay(50);
-                    if (epoch != _recipeEpoch || _recipeLoading || _recipeRefreshPending) throw new InvalidOperationException("재검사 중 레시피가 변경되었습니다.");
-                    verdict = _captureSession.ReplayVerdict(frame);
-                    if (_capture != null && verdict != null && _capture.TryCapture(frame, _captureSession.Procedure.GUID, out png, out message)) break;
-                } while (DateTime.UtcNow < deadline);
-                if (png == null || verdict == null) throw new InvalidOperationException("동일 회차의 재검사 판정/화면을 받지 못했습니다. 이전 화면을 결과로 표시하지 않습니다. " + message);
-                verdict = verdict.Trim().ToUpperInvariant();
-                if (verdict != "OK" && verdict != "NG") throw new InvalidOperationException("재검사 판정을 확인할 수 없습니다: " + verdict);
-                var result = new NgRecord { Camera = _settings.Title, Recipe = recipe, TimeUtc = DateTime.UtcNow, Frame = frame,
-                    ViewName = "재검사 " + verdict + " | 원본: " + original.ImagePath };
-                new NgImageWindow(result, png, verdict).Show();
-                _film.SetStatus("재검사 " + verdict + " · 회차 " + frame);
-            }
-            catch (Exception ex)
-            {
-                Trace.WriteLine(ex); _film.SetStatus("재검사 실패: " + ex.Message);
-                MessageBox.Show(this, ex.Message, "재검사 실패", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-            finally { _replayBusy = false; if (!IsDisposed) _film.SetBusy(false); }
-        }
-        protected override void OnFormClosing(FormClosingEventArgs e)
-        {
-            if (_replayBusy) { e.Cancel = true; _film.SetStatus("재검사가 완료된 후 닫아주세요."); }
-            else if (_replay != null && !_recipeLoading && !_recipeRefreshPending && !ChangeReplayMode(false)) e.Cancel = true;
-            base.OnFormClosing(e);
         }
 
         protected override void OnFormClosed(FormClosedEventArgs e)

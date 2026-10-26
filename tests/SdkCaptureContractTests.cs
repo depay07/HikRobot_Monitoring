@@ -9,8 +9,6 @@ class SdkCaptureContractTests
 {
     static BindingFlags F=BindingFlags.Instance|BindingFlags.NonPublic;
     static int checks;
-    static int countEvents;
-    static void CountResult(object sender, EventArgs args) { countEvents++; }
     static void Check(bool yes,string text) {if(!yes)throw new Exception(text);checks++;}
     static IEnumerable<MethodBase> Calls(MethodInfo method)
     {
@@ -49,40 +47,12 @@ class SdkCaptureContractTests
         Check(!calls.Any(m=>m.Name=="Load" && m.DeclaringType.FullName=="VM.Core.VmSolution"),"startup must not force configured recipe");
         var pathCalls=Calls(app.GetType("SC6000DualMonitor.RemoteSolutionSession").GetProperty("CurrentPath").GetGetMethod()).ToArray();
         Check(pathCalls.Any(m=>m.Name=="ReadDevicePath") && !pathCalls.Any(m=>m.Name=="get_SolutionPath"),"native camera path instead of stale managed cache");
-        var replayType=app.GetType("SC6000DualMonitor.RemoteReplayDevice");
-        var replayCalls=Calls(replayType.GetMethod("Run")).ToArray();
-        Check(replayCalls.Any(m=>m.Name=="SetImageData") && !replayCalls.Any(m=>m.Name=="SetImagePath"),"send PC pixels, never remote PC path");
-        Check(replayCalls.Any(m=>m.Name=="Run" && m.GetParameters().Any(p=>p.ParameterType==typeof(uint).MakeByRefType())),"SDK returns exact replay frame");
-        Check(!replayCalls.Any(m=>m.Name=="Save" || m.Name=="Load"),"replay does not load or save recipes");
-        string config=Path.GetTempFileName();
-        try
-        {
-            File.WriteAllText(config,"CAMERAS=2\n[CAMERA1]\nRAW_IMAGE_ROOT=D:\\images\\camera1\n[CAMERA2]\nRAW_IMAGE_ROOT=E:\\카메라2 원본\nREPLAY_IMAGE_MODULE=Image Source1\n");
-            var ini=app.GetType("SC6000DualMonitor.IniConfig"); var loaded=ini.GetMethod("Load").Invoke(null,new object[]{config});
-            var cam1=ini.GetMethod("GetCamera").Invoke(loaded,new object[]{1}); var cam2=ini.GetMethod("GetCamera").Invoke(loaded,new object[]{2});
-            Check((string)cam1.GetType().GetProperty("RawImageRoot").GetValue(cam1,null)=="D:\\images\\camera1","camera1 FTP root parsed");
-            Check((string)cam2.GetType().GetProperty("RawImageRoot").GetValue(cam2,null)=="E:\\카메라2 원본","camera2 independent Unicode root parsed");
-            Check((string)cam2.GetType().GetProperty("ReplayImageModule").GetValue(cam2,null)=="Image Source1","optional source name parsed");
-        }
-        finally {File.Delete(config);}
-        var sessionType=app.GetType("SC6000DualMonitor.RemoteInspectionSession");
-        var session=FormatterServices.GetUninitializedObject(sessionType);
-        foreach(string fieldName in new[]{"_callbackGate","_ngFrames","_replayResults","_replayFrames"})
-        {
-            var field=sessionType.GetField(fieldName,F); field.SetValue(session,Activator.CreateInstance(field.FieldType,true));
-        }
-        var resultEvent=sessionType.GetEvent("ResultArrived");
-        resultEvent.AddEventHandler(session,Delegate.CreateDelegate(resultEvent.EventHandlerType,typeof(SdkCaptureContractTests).GetMethod("CountResult",BindingFlags.Static|BindingFlags.NonPublic)));
-        var callbackType=Assembly.LoadFrom(Path.Combine(sdk,"VMControls.Interface.dll")).GetType("VMControls.Interface.ValueEventArgs");
-        var callback=Activator.CreateInstance(callbackType); callbackType.GetField("ExecuteCount").SetValue(callback,42u);
-        var completed=sessionType.GetMethod("OnProcedureCompleted",F);
-        sessionType.GetMethod("SuppressProductionResults").Invoke(session,new object[]{true});
-        completed.Invoke(session,new object[]{null,callback}); Check(countEvents==0,"replay completion excluded from production counter");
-        sessionType.GetMethod("SuppressProductionResults").Invoke(session,new object[]{false});
-        completed.Invoke(session,new object[]{null,callback}); Check(countEvents==0,"late replay completion still excluded after resume");
-        callbackType.GetField("ExecuteCount").SetValue(callback,43u);
-        // No procedure was constructed: a new production frame reports a read error instead of contacting hardware.
-        completed.Invoke(session,new object[]{null,callback}); Check(countEvents==1,"new production frames accepted after resume");
+        Check(app.GetType("SC6000DualMonitor.RemoteReplayDevice")==null && app.GetType("SC6000DualMonitor.ReplayControl")==null,"camera replay implementation removed");
+        Check(!app.GetReferencedAssemblies().Any(a=>a.Name=="ImageSourceModuleCs"),"no image source mutation dependency");
+        var film=app.GetType("SC6000DualMonitor.NgFilmStrip");
+        Check(film.GetEvent("ReplayRequested")==null && film.GetProperty("ReplayMode")==null,"no replay events or mode");
+        var viewer=app.GetType("SC6000DualMonitor.ViewerForm");
+        Check(viewer.GetMethod("RunReplay",F)==null && viewer.GetMethod("ChangeReplayMode",F)==null,"no replay handlers in viewer");
         Console.WriteLine("PASS: "+checks+" installed SDK contracts and startup IL checks (no camera calls)");
     }
 }

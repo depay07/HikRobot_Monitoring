@@ -48,7 +48,6 @@
     <Reference Include="PresentationFramework" />
     <Reference Include="WindowsFormsIntegration" />
     <Reference Include="Apps.UIHelper"><Private>False</Private></Reference>
-    <Reference Include="ImageSourceModuleCs"><Private>False</Private></Reference>
     <Reference Include="IMVSBlobFindModuCs"><Private>False</Private></Reference>
     <Reference Include="IfModuleCs">
       <Private>False</Private>
@@ -76,9 +75,6 @@
     <Compile Include="NgFilmStrip.cs" />
     <Compile Include="NgFrameMatcher.cs" />
     <Compile Include="FrontendCapture.cs" />
-    <Compile Include="FtpOriginals.cs" />
-    <Compile Include="ReplayControl.cs" />
-    <Compile Include="RemoteReplayDevice.cs" />
     <Compile Include="MonitorForm.cs" />
     <Compile Include="CameraLayout.cs" />
     <Compile Include="MonitorHeader.cs" />

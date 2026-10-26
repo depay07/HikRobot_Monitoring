@@ -13,8 +13,6 @@ namespace SC6000DualMonitor
     internal sealed class NgRecord
     {
         public string ImagePath, Camera, Recipe, ViewName;
-        public bool IsOriginal;
-        public long FileLength;
         public DateTime TimeUtc;
         public uint Frame;
         public string Description { get { return Camera + " | " + TimeUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss.fff") +

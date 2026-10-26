@@ -163,7 +163,7 @@ namespace SC6000DualMonitor
                     await System.Threading.Tasks.Task.Delay(100);
                 if (_viewers.Any(p => p != null && !p.HasExited))
                 {
-                    MessageBox.Show(this, "카메라 창이 아직 종료되지 않았습니다. 재검사를 완료하고 뷰어 모드로 복원한 뒤 다시 닫아주세요.\r\n설정 복원 중인 프로세스는 강제로 종료하지 않습니다.", "종료 대기");
+                    MessageBox.Show(this, "카메라 창이 아직 종료되지 않았습니다. NG 파일 저장과 연결 해제가 완료된 뒤 다시 닫아주세요.\r\n처리 중인 카메라 창은 강제로 종료하지 않습니다.", "종료 대기");
                     _watch.Start(); return;
                 }
                 _viewersClosed = true; Close();
