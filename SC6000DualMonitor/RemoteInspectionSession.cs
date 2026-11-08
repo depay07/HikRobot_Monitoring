@@ -49,28 +49,16 @@ namespace SC6000DualMonitor
 
         public RemoteInspectionSession(CameraSettings settings)
         {
-            _procedureName = settings.ProcedureName;
-            _conditionName = settings.ConditionModuleName;
             _cameraIp = settings.Ip;
             var solutions = new RemoteSolutionSession(settings.SolutionDirectory, settings.SolutionPassword);
             _recipeSave = new CurrentRecipeSave(() => solutions.CurrentPath,
-                path => VmSolution.SaveAs(path)); // null password preserves the SDK recipe password
+                path => VmSolution.SaveAs(path)); // Preserves the current camera recipe and its password
             _definitions = ConditionDefinition.Parse(settings.ConditionItems);
-            _procedure = VmSolution.Instance[_procedureName] as VmProcedure;
-            if (_procedure == null) throw new InvalidOperationException("검사 흐름을 찾을 수 없습니다: " + _procedureName + "\r\nconfig.ini의 PROCEDURE를 확인하세요.");
-            // Use SDK instance names, not the generic title of the parameter dialog.
-            var modules = _procedure.GetAllModuleList();
-            var candidates = new List<IfModuleTool>();
-            for (int i = 0; i < modules.nNum; i++)
-            {
-                var module = _procedure.GetModuleByID(modules.astModuleInfo[i].nModuleID) as IfModuleTool;
-                if (module != null) candidates.Add(module);
-            }
-            var matches = candidates.Where(c => string.Equals(c.Name, _conditionName, StringComparison.Ordinal)).ToList();
-            if (matches.Count != 1)
-                throw new InvalidOperationException("Condition Detection 모듈 이름을 정확히 지정하세요: " + _conditionName +
-                    "\r\nSDK에서 확인한 이름: " + string.Join(", ", candidates.Select(c => c.Name + " (ID " + c.ID + ")")));
-            _condition = matches[0];
+            var selection = AutoSelectInspectionTarget(settings.ProcedureName, settings.ConditionModuleName);
+            _procedure = selection.Procedure;
+            _condition = selection.Condition;
+            _procedureName = _procedure.Name;
+            _conditionName = _condition.Name;
             ReadRanges();
             _condition.ModuleResultCallBackArrived += OnConditionResult;
             _procedure.ModuleResultCallBackArrived += OnProcedureCompleted;
@@ -82,6 +70,98 @@ namespace SC6000DualMonitor
                 throw;
             }
         }
+
+        private sealed class InspectionTarget
+        {
+            public VmProcedure Procedure;
+            public IfModuleTool Condition;
+            public string Description { get { return Procedure.Name + " / " + Condition.Name; } }
+        }
+
+        // Locate the actual modules from the recipe currently running on the camera.
+        // Optional config names are preferences, never mandatory hardcoded defaults.
+        // Do not guess if two candidate inspectors are equally plausible.
+        private InspectionTarget AutoSelectInspectionTarget(string preferredProcedure, string preferredCondition)
+        {
+            var list = VmSolution.Instance.GetAllProcedureList();
+            var available = new List<string>();
+            var targets = new List<InspectionTarget>();
+            var failures = new List<string>();
+            if (list == null || list.astProcessInfo == null || list.nNum == 0)
+                throw new InvalidOperationException("카메라의 실행 중인 레시피에서 검사 흐름을 찾지 못했습니다.");
+            for (int p = 0; p < list.nNum && p < list.astProcessInfo.Length; p++)
+            {
+                string name = list.astProcessInfo[p].strProcessName;
+                if (string.IsNullOrWhiteSpace(name)) continue;
+                VmProcedure procedure = VmSolution.Instance[name] as VmProcedure;
+                if (procedure == null) continue;
+                available.Add(name);
+                var modules = procedure.GetAllModuleList();
+                if (modules == null || modules.astModuleInfo == null) continue;
+                for (int i = 0; i < modules.nNum && i < modules.astModuleInfo.Length; i++)
+                {
+                    var condition = procedure.GetModuleByID(modules.astModuleInfo[i].nModuleID) as IfModuleTool;
+                    if (condition == null) continue;
+                    try
+                    {
+                        // The numeric Min/Max/ReMark dynamic parameters identify a usable
+                        // Condition Detection module without assuming its display name.
+                        ConditionParameterReader.Read(key =>
+                        {
+                            string value = string.Empty;
+                            int error = condition.ModuParams.GetParamValue(key, ref value);
+                            if (error != 0) throw new VmException(error);
+                            return value;
+                        }, _definitions);
+                        targets.Add(new InspectionTarget { Procedure = procedure, Condition = condition });
+                    }
+                    catch (Exception ex)
+                    {
+                        // Most other module types are not Condition Detection tools.
+                        failures.Add(name + "/" + condition.Name + ": " + ex.Message);
+                    }
+                }
+            }
+            if (targets.Count == 0)
+                throw new InvalidOperationException("Condition Detection 조건 모듈을 자동으로 찾지 못했습니다." +
+                    "\r\n검색한 흐름: " + string.Join(", ", available) +
+                    "\r\nVisionMaster에서 해당 검사 흐름의 Condition Detection에 숫자 Min/Max 조건이 있는지 확인하세요.");
+
+            string pp = (preferredProcedure ?? "").Trim();
+            string pc = (preferredCondition ?? "").Trim();
+            var candidates = targets.AsEnumerable();
+
+            // Fully specified and valid pair wins; otherwise use uniquely matching name(s).
+            if (pp.Length > 0 && pc.Length > 0)
+            {
+                var both = candidates.Where(t => t.Procedure.Name == pp && t.Condition.Name == pc).ToList();
+                if (both.Count == 1) return both[0];
+            }
+            if (pp.Length > 0)
+            {
+                var byProcedure = candidates.Where(t => t.Procedure.Name == pp).ToList();
+                if (pc.Length > 0)
+                {
+                    var preferred = byProcedure.Where(t => t.Condition.Name == pc).ToList();
+                    if (preferred.Count == 1) return preferred[0];
+                }
+                if (byProcedure.Count == 1) return byProcedure[0];
+            }
+            if (pc.Length > 0)
+            {
+                var byCondition = candidates.Where(t => t.Condition.Name == pc).ToList();
+                if (byCondition.Count == 1) return byCondition[0];
+            }
+            if (targets.Count == 1) return targets[0];
+
+            var enabled = targets.Where(t => t.Procedure.IsEnabled).ToList();
+            if (enabled.Count == 1) return enabled[0];
+
+            throw new InvalidOperationException("검사 모듈 후보가 여러 개라 자동 선택하지 않았습니다." +
+                "\r\n후보: " + string.Join(" | ", targets.Select(t => t.Description)) +
+                "\r\n선택하려는 흐름/모듈 이름을 config.ini의 PROCEDURE 및 CONDITION_MODULE에 지정하세요.");
+        }
+
         private void OnConditionResult(object sender, EventArgs args)
         {
             lock (_callbackGate)
