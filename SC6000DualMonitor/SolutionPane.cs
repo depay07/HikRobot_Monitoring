@@ -25,6 +25,17 @@ namespace SC6000DualMonitor
         private bool _connected, _busy;
         public bool IsBusy { get { return _busy; } }
         public void RefreshCurrent() { ReadCurrent(); }
+        // Hide the entire experimental inspection area unless a real SDK inspection
+        // session is successfully bound. Do not present dead Count/CSV/Set Up controls.
+        public void SetInspectionAvailable(bool available)
+        {
+            var table = Inspection.Parent as TableLayoutPanel;
+            if (table == null) return;
+            int row = table.GetRow(Inspection);
+            Inspection.Visible = available;
+            table.RowStyles[row].Height = available ? 116 : 0;
+            table.PerformLayout();
+        }
         private string _currentPath;
         public SolutionPane(ISolutionSession session, Action reloadFrontend, CameraSettings settings = null)
         {
@@ -59,6 +70,7 @@ namespace SC6000DualMonitor
             Inspection = new InspectionPane(settings);
             layout.Controls.Add(_current, 0, 0); layout.Controls.Add(Inspection, 0, 1); layout.Controls.Add(Content, 0, 2); layout.Controls.Add(footer, 0, 3);
             Controls.Add(layout);
+            SetInspectionAvailable(false);
             _choices.SelectedIndexChanged += delegate { UpdateEnabled(); }; // Selection never calls Load.
             _refresh.Click += delegate { RefreshSolutions(false); };
             _change.Click += delegate { ChangeSolution(); };
