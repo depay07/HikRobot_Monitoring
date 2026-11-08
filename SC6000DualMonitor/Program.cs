@@ -114,6 +114,7 @@ namespace SC6000DualMonitor
         public string BlobModuleName { get; set; }
         public string ConditionItems { get; set; }
         public string PartNumber { get; set; }
+        public bool EnableExperimentalInspection { get; set; }
     }
 
     internal sealed class IniConfig
@@ -209,6 +210,8 @@ namespace SC6000DualMonitor
                 BlobModuleName = Get(section + ".BLOB_MODULE", string.Empty).Trim(),
                 ConditionItems = Get(section + ".CONDITION_ITEMS", ConditionDefinition.DefaultItems),
                 PartNumber = Get(section + ".PART_NO", string.Empty),
+                EnableExperimentalInspection = string.Equals(Get(section + ".ENABLE_EXPERIMENTAL_INSPECTION", "0"), "1", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(Get(section + ".ENABLE_EXPERIMENTAL_INSPECTION", "0"), "true", StringComparison.OrdinalIgnoreCase),
                 MonitorIndex = MonitorIndex
             };
         }
