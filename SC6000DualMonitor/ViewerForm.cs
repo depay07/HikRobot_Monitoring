@@ -26,6 +26,7 @@ namespace SC6000DualMonitor
         private bool _connected;
         private bool _resizeQueued;
         private readonly Panel _live = new Panel { Dock = DockStyle.Fill };
+        private readonly TableLayoutPanel _images;
         private readonly Timer _captureTimer = new Timer { Interval = 50 };
         private readonly NgHistoryStore _history;
         private readonly NgFilmStrip _film;
@@ -78,12 +79,14 @@ namespace SC6000DualMonitor
             _solutions = new SolutionPane(_remoteSolutions, ReloadFrontend, settings);
             _solutions.SolutionChanging += delegate { ResetCaptureBinding(); _solutions.Inspection.Unbind(); };
             _solutions.SolutionChanged += delegate { BindInspection(); _recipeLoading = _recipeRefreshPending = false; };
-            var images = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty, Padding = Padding.Empty };
-            images.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); images.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 196));
-            images.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            _images = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty, Padding = Padding.Empty };
+            _images.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            _images.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 0));
+            _images.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             _live.Margin = _film.Margin = Padding.Empty;
-            _live.Controls.Add(_status); images.Controls.Add(_live, 0, 0); images.Controls.Add(_film, 1, 0);
-            _solutions.Content.Controls.Add(images);
+            _live.Controls.Add(_status); _images.Controls.Add(_live, 0, 0); _images.Controls.Add(_film, 1, 0);
+            _film.Visible = false;
+            _solutions.Content.Controls.Add(_images);
             _displayHold = new InspectionDisplayHold(_live);
             _live.SizeChanged += delegate { QueueFrontendResize(); };
             _captureTimer.Tick += delegate { CaptureTick(); };
@@ -100,11 +103,23 @@ namespace SC6000DualMonitor
             _frontend.LoadFrontendSource();
             _frontendLoaded = true;
             QueueFrontendResize();
-            BeginInvoke(new Action(AttachCapture));
+            if (_captureSession != null) BeginInvoke(new Action(AttachCapture));
+        }
+
+        // No inspection/CSV/NG controls are shown before their SDK callbacks are ready.
+        private void ShowInspectionFeatures(bool ready)
+        {
+            _solutions.SetInspectionAvailable(ready);
+            _film.Visible = ready;
+            _images.ColumnStyles[1].Width = ready ? 196 : 0;
+            if (!ready) DetachCapture();
+            _images.PerformLayout();
+            QueueFrontendResize();
         }
 
         private void BindInspection()
         {
+            ShowInspectionFeatures(false);
             _inspectionBindingError = null;
             ResetCaptureBinding();
             RemoteInspectionSession inspection = null;
@@ -117,15 +132,17 @@ namespace SC6000DualMonitor
                 _solutions.Inspection.Bind(inspection, path);
                 _boundRecipe = path; _captureSession = inspection;
                 inspection.NgCaptureRequested += OnNgCapture;
+                ShowInspectionFeatures(true);
             }
             catch (Exception ex)
             {
                 if (inspection != null) inspection.Dispose();
                 _inspectionBindingError = ex.Message;
-                _film.SetStatus("NG/ERROR 저장 연결 실패: " + ex.Message);
+                // Keep the camera preview available, but do not show nonfunctional
+                // Count, Set Up, CSV or NG/ERROR panels.
                 _solutions.Inspection.Failed(ex);
-                _solutions.Inspection.SetModelPath(path);
-                Trace.WriteLine(ex);
+                ShowInspectionFeatures(false);
+                Trace.WriteLine("Inspection SDK unavailable; preview only: " + ex);
             }
         }
 
@@ -214,7 +231,7 @@ namespace SC6000DualMonitor
                 BindInspection();
                 _recipeLoading = _recipeRefreshPending = false;
                 _captureTimer.Start();
-                BeginInvoke(new Action(AttachCapture));
+                if (_captureSession != null) BeginInvoke(new Action(AttachCapture));
             }
             catch (Exception ex)
             {
@@ -251,12 +268,13 @@ namespace SC6000DualMonitor
                 }
                 catch (Exception ex) { _film.SetStatus("레시피 화면 동기화 실패: " + ex.Message); }
             }
+            if (_captureSession == null) return;
             if ((_capture == null || !_capture.HasViews) && DateTime.UtcNow - _lastAttachAttempt > TimeSpan.FromSeconds(2)) AttachCapture();
             TryPendingCaptures();
         }
         private void AttachCapture()
         {
-            if (IsDisposed || !_frontendLoaded || _frontend == null) return;
+            if (IsDisposed || !_frontendLoaded || _frontend == null || _captureSession == null) return;
             _lastAttachAttempt = DateTime.UtcNow;
             DetachCapture();
             try { _capture = new FrontendCapture(_frontend); _capture.Rendered += TryPendingCaptures;
