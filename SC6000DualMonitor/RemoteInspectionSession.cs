@@ -87,7 +87,7 @@ namespace SC6000DualMonitor
             var available = new List<string>();
             var targets = new List<InspectionTarget>();
             var failures = new List<string>();
-            if (list == null || list.astProcessInfo == null || list.nNum == 0)
+            if (list.astProcessInfo == null || list.nNum == 0)
                 throw new InvalidOperationException("카메라의 실행 중인 레시피에서 검사 흐름을 찾지 못했습니다.");
             for (int p = 0; p < list.nNum && p < list.astProcessInfo.Length; p++)
             {
@@ -97,7 +97,7 @@ namespace SC6000DualMonitor
                 if (procedure == null) continue;
                 available.Add(name);
                 var modules = procedure.GetAllModuleList();
-                if (modules == null || modules.astModuleInfo == null) continue;
+                if (modules.astModuleInfo == null) continue;
                 for (int i = 0; i < modules.nNum && i < modules.astModuleInfo.Length; i++)
                 {
                     var condition = procedure.GetModuleByID(modules.astModuleInfo[i].nModuleID) as IfModuleTool;
