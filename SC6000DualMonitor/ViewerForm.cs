@@ -49,6 +49,7 @@ namespace SC6000DualMonitor
         private long _pendingWriteBytes;
         private bool _capturing, _recipeEventsSubscribed;
         private string _inspectionBindingError;
+        private bool _inspectionValidated;
         private sealed class PendingCapture { public NgCaptureEventArgs Result; public string Recipe; public string LastError; public int HoldToken; }
 
 
@@ -119,6 +120,7 @@ namespace SC6000DualMonitor
 
         private void BindInspection()
         {
+            _inspectionValidated = false;
             ShowInspectionFeatures(false);
             _inspectionBindingError = null;
             ResetCaptureBinding();
@@ -155,6 +157,7 @@ namespace SC6000DualMonitor
             {
                 if (!ReferenceEquals(sender, _captureSession)) return;
                 _captureSession.ResultArrived -= OnFirstValidInspection;
+                _inspectionValidated = true;
                 ShowInspectionFeatures(true);
                 AttachCapture();
             });
@@ -282,13 +285,13 @@ namespace SC6000DualMonitor
                 }
                 catch (Exception ex) { _film.SetStatus("레시피 화면 동기화 실패: " + ex.Message); }
             }
-            if (_captureSession == null) return;
+            if (_captureSession == null || !_inspectionValidated) return;
             if ((_capture == null || !_capture.HasViews) && DateTime.UtcNow - _lastAttachAttempt > TimeSpan.FromSeconds(2)) AttachCapture();
             TryPendingCaptures();
         }
         private void AttachCapture()
         {
-            if (IsDisposed || !_frontendLoaded || _frontend == null || _captureSession == null) return;
+            if (IsDisposed || !_frontendLoaded || _frontend == null || _captureSession == null || !_inspectionValidated) return;
             _lastAttachAttempt = DateTime.UtcNow;
             DetachCapture();
             try { _capture = new FrontendCapture(_frontend); _capture.Rendered += TryPendingCaptures;
@@ -307,6 +310,7 @@ namespace SC6000DualMonitor
                 _captureSession.ResultArrived -= OnFirstValidInspection;
             }
             _captureSession = null;
+            _inspectionValidated = false;
             if (_pendingCaptures.Count > 0) { _missed += _pendingCaptures.Count; _film.SetStatus("레시피 전환으로 미완료 NG 캡처 " + _pendingCaptures.Count + "건 취소 / 누락 " + _missed); }
             _pendingCaptures.Clear(); _boundRecipe = null;
             lock (_signalGate) { _signals.Clear(); _signalDrops = 0; }
