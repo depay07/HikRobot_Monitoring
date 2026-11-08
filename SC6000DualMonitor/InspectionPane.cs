@@ -15,6 +15,15 @@ namespace SC6000DualMonitor
         private readonly Button _savePart = new Button { Text = "모델명 저장", AutoSize = true };
         private readonly Button _setup = new Button { Text = "Set Up", AutoSize = true };
         private readonly Button _reset = new Button { Text = "Reset", AutoSize = true };
+        private readonly CheckBox _csvEnabled = new CheckBox { Text = "CSV 기록 저장", AutoSize = true, Checked = false };
+        private readonly Button _csvFolder = new Button { Text = "폴더", AutoSize = true };
+        private readonly Label _csvState = new Label { AutoSize = true, Text = "CSV 기록 중지", ForeColor = Color.DimGray };
+        private readonly CsvInspectionWriter _csvWriter;
+        private readonly CsvLoggingPreferences _csvPreferences;
+        private volatile string _csvPartNumber = "";
+        private volatile string _csvRecipePath = "";
+        private string _csvActivationError;
+        private bool _updatingCsvCheckbox;
         private readonly Label _state = new Label { Dock = DockStyle.Fill, AutoEllipsis = true, TextAlign = ContentAlignment.MiddleLeft };
         private readonly Label[] _counts = new Label[4];
         private readonly PartNumberStore _store;
@@ -28,12 +37,15 @@ namespace SC6000DualMonitor
         {
             _settings = settings;
             _store = new PartNumberStore(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WILLB", "SC6000Monitor", "Models"));
+            _csvWriter = new CsvInspectionWriter(settings.Ip);
+            _csvPreferences = new CsvLoggingPreferences(settings.Ip);
             Dock = DockStyle.Fill; Margin = Padding.Empty;
             BackColor = Color.FromArgb(238, 242, 246); ForeColor = Color.FromArgb(20, 40, 60);
             Font = new Font("Segoe UI", 9);
-            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Margin = Padding.Empty, Padding = new Padding(6, 2, 6, 2) };
+            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Margin = Padding.Empty, Padding = new Padding(6, 2, 6, 2) };
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             var partRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, Margin = Padding.Empty };
             partRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 82));
@@ -67,10 +79,24 @@ namespace SC6000DualMonitor
                 lock (_bindingGate) detail = _lastError;
                 if (detail != null) MessageBox.Show(this, detail, "최근 검사 오류 (" + (_settings == null ? "" : _settings.Ip) + ")", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             };
-            bottom.Controls.Add(_setup, 0, 0); bottom.Controls.Add(_state, 1, 0); layout.Controls.Add(bottom, 0, 2);
+            var csvRow = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = false, WrapContents = false, FlowDirection = FlowDirection.LeftToRight };
+            csvRow.Controls.Add(_csvEnabled);
+            csvRow.Controls.Add(_csvFolder);
+            csvRow.Controls.Add(_csvState);
+            layout.Controls.Add(csvRow, 0, 2);
+            bottom.Controls.Add(_setup, 0, 0); bottom.Controls.Add(_state, 1, 0); layout.Controls.Add(bottom, 0, 3);
             Controls.Add(layout);
             _part.Text = settings == null ? "" : settings.PartNumber;
             _state.Text = "검사 결과 연결 대기";
+            _csvPartNumber = _part.Text;
+            _csvEnabled.Checked = _csvPreferences.Read();
+            _csvEnabled.Enabled = false;
+            _csvEnabled.CheckedChanged += delegate { ApplyCsvSetting(); };
+            _csvFolder.Click += delegate
+            {
+                try { System.Diagnostics.Process.Start("explorer.exe", "\"" + _csvWriter.Folder + "\""); }
+                catch (Exception ex) { MessageBox.Show(this, ex.Message, "CSV 저장 폴더"); }
+            };
             _savePart.Enabled = _setup.Enabled = false;
             _savePart.Click += delegate { SavePart(); };
             _setup.Click += delegate { OpenSetup(); };
@@ -88,6 +114,8 @@ namespace SC6000DualMonitor
             SetModelPath(solutionPath);
             lock (_bindingGate) { _session = session; _session.ResultArrived += OnResult; }
             _setup.Enabled = true;
+            _csvEnabled.Enabled = true;
+            if (_csvEnabled.Checked) ApplyCsvSetting();
         }
         public void SetModelPath(string solutionPath)
         {
@@ -99,6 +127,8 @@ namespace SC6000DualMonitor
                 try { _part.Text = _store.Read(_settings.Ip, solutionPath, _settings.PartNumber); }
                 catch (Exception ex) { storageError = "모델명 읽기 실패: " + ex.Message; }
             }
+            _csvRecipePath = solutionPath ?? "";
+            _csvPartNumber = _part.Text;
             _savePart.Enabled = !string.IsNullOrWhiteSpace(solutionPath);
             if (storageError != null) _state.Text = storageError;
             else if (_setup.Enabled || _state.Text == "검사 결과 연결 대기")
@@ -114,12 +144,61 @@ namespace SC6000DualMonitor
             }
             // Do not queue one UI message per frame: the display timer paints snapshots.
         }
+        private void OnCsvSample(object sender, CsvInspectionSample sample)
+        {
+            lock (_bindingGate)
+            {
+                if (!ReferenceEquals(sender, _session) || !_csvEnabled.Checked) return;
+                _csvWriter.Enqueue(sample, _csvPartNumber, _csvRecipePath);
+            }
+        }
+        private void ApplyCsvSetting()
+        {
+            if (_updatingCsvCheckbox) return;
+            var session = _session;
+            if (session == null) return;
+            bool wanted = _csvEnabled.Checked;
+            try
+            {
+                if (wanted)
+                {
+                    session.CsvSampleReady -= OnCsvSample;
+                    session.CsvSampleReady += OnCsvSample;
+                    session.SetCsvCaptureEnabled(true);
+                }
+                else
+                {
+                    session.SetCsvCaptureEnabled(false);
+                    session.CsvSampleReady -= OnCsvSample;
+                }
+                _csvPreferences.Write(wanted);
+                _csvActivationError = null;
+            }
+            catch (Exception ex)
+            {
+                _csvActivationError = ex.Message;
+                try { session.SetCsvCaptureEnabled(false); } catch { }
+                session.CsvSampleReady -= OnCsvSample;
+                _updatingCsvCheckbox = true;
+                _csvEnabled.Checked = false;
+                _updatingCsvCheckbox = false;
+                MessageBox.Show(this, "CSV 기록 활성화 실패:\r\n" + ex.Message + "\r\n기존 검사 기능은 유지됩니다.", "CSV 기록", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            UpdateCsvStatus();
+        }
+        private void UpdateCsvStatus()
+        {
+            _csvState.Text = _csvActivationError != null ? "CSV 오류 (상세 확인)" :
+                (_csvEnabled.Checked ? _csvWriter.Status : "CSV 기록 중지");
+            _csvState.ForeColor = _csvActivationError != null || _csvWriter.HasError ? Color.Firebrick : Color.DarkGreen;
+        }
         public void Unbind()
         {
             RemoteInspectionSession previous;
             lock (_bindingGate) { previous = _session; _session = null; _counter.Reset(); _lastError = null; }
             // Outside the binding lock: Dispose can wait for an SDK callback holding its own lock.
-            if (previous != null) { previous.ResultArrived -= OnResult; previous.Dispose(); }
+            if (previous != null) { previous.ResultArrived -= OnResult; previous.CsvSampleReady -= OnCsvSample; previous.Dispose(); }
+            _csvEnabled.Enabled = false;
             _setup.Enabled = _savePart.Enabled = false;
             _solutionPath = null;
             _state.Text = "검사 결과 연결 대기";
@@ -134,10 +213,11 @@ namespace SC6000DualMonitor
             long[] values = { count.Ok, count.Ng, count.Errors, count.Total };
             for (int i = 0; i < 4; i++) _counts[i].Text = values[i].ToString("N0");
             if (_session != null && count.Total > 0 && !_setupOpen) _state.Text = count.LastResult;
+            UpdateCsvStatus();
         }
         private void SavePart()
         {
-            try { _store.Write(_settings.Ip, _solutionPath, _part.Text.Trim()); _part.Text = _part.Text.Trim(); _state.Text = "모델명 저장 완료"; }
+            try { _store.Write(_settings.Ip, _solutionPath, _part.Text.Trim()); _part.Text = _part.Text.Trim(); _csvPartNumber = _part.Text; _state.Text = "모델명 저장 완료"; }
             catch (Exception ex) { MessageBox.Show(this, ex.Message, "PART NO", MessageBoxButtons.OK, MessageBoxIcon.Error); }
         }
         private void OpenSetup()
@@ -149,7 +229,7 @@ namespace SC6000DualMonitor
         }
         protected override void Dispose(bool disposing)
         {
-            if (disposing) { _displayTimer.Stop(); _displayTimer.Dispose(); Unbind(); }
+            if (disposing) { _displayTimer.Stop(); _displayTimer.Dispose(); Unbind(); _csvWriter.Dispose(); }
             base.Dispose(disposing);
         }
     }
