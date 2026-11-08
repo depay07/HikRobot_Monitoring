@@ -245,7 +245,9 @@ namespace SC6000DualMonitor
             }
         }
         // Called only when the operator opts in. No camera recipe/Save Text parameters are changed.
-        public void SetCsvCaptureEnabled(bool enabled)
+        public string CsvProcedureName { get { return _procedure.Name; } }
+        public string[] ListCsvModuleNames() { return CsvModuleCapture.ListModuleNames(_procedure); }
+        public void SetCsvCaptureEnabled(bool enabled, CsvModuleMapping mapping = null)
         {
             if (enabled)
             {
@@ -254,7 +256,8 @@ namespace SC6000DualMonitor
                     if (_disposed) throw new ObjectDisposedException("RemoteInspectionSession");
                     if (_csvCapture != null) return;
                 }
-                var created = new CsvModuleCapture(_procedure);
+                if (mapping == null) throw new InvalidOperationException("CSV 항목 설정을 먼저 완료하세요.");
+                var created = new CsvModuleCapture(_procedure, mapping);
                 created.SampleReady += OnCsvSample;
                 bool accepted = false;
                 lock (_callbackGate)
