@@ -117,6 +117,7 @@ namespace SC6000DualMonitor
             SetModelPath(solutionPath);
             lock (_bindingGate) { _session = session; _session.ResultArrived += OnResult; }
             _setup.Enabled = true;
+            _state.Text = "검사 연결: " + session.TargetDescription;
             _csvEnabled.Enabled = true;
             if (_csvEnabled.Checked) ApplyCsvSetting();
         }
