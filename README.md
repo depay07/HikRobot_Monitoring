@@ -1,5 +1,27 @@
 # WILLB SC6000 Monitor
 
+## 간편 연결 (카메라 IP/비밀번호만 설정)
+
+`SC6000DualMonitor/config.ini`에서 일반 사용자는 아래 3~4줄만 설정하면 됩니다. 다른 항목은 전부 선택사항입니다.
+
+```ini
+CAMERAS=1
+[CAMERA1]
+IP=192.168.10.110
+PASSWORD=
+```
+
+- `IP`는 예시입니다. 실제 카메라 주소를 입력하세요. 비밀번호가 설정되어 있다면 `PASSWORD`에 입력하세요.
+- 시작 시 **현재 카메라에서 실행 중인 Solution**에 접속하며 `SOLUTION_PATH`는 사용하지 않습니다.
+- SDK의 `GetAllProcedureList()`와 조건 파라미터 목록으로 실제 검사 흐름/Condition Detection 모듈을 자동 탐색합니다.
+- 예전에 `PROCEDURE=Proc1` 등이 남아 있어도 유효한 단일 검사 후보를 찾으면 자동 선택합니다. 후보가 여러 개면 임의 선택하지 않고 후보 목록을 오류 메시지에 보여줍니다. 이때에만 실제 이름으로 `PROCEDURE`, `CONDITION_MODULE`을 지정하면 됩니다.
+- `SOLUTION_DIRECTORY`는 **수동 레시피 변경 목록**이 필요할 때만 지정합니다. `SOLUTION_PASSWORD`는 **수동 변경 시에만** 사용합니다.
+- `CONDITION_ITEMS`는 선택사항이며 카메라의 `DynamicParams`에서 숫자 조건 목록을 직접 조회합니다. 모듈 내부에 읽을 수 있는 숫자 조건이 없으면 Set Up 연결이 실패할 수 있습니다.
+- 기존 `config.ini`는 덮어쓰지 않습니다. 저장한 설정을 유지하면서 새로운 자동 탐색을 사용합니다.
+
+**검증 제한:** Windows 공급업체 SDK 바이너리 및 실제 SC6000 연결이 없는 환경에서 작성했습니다. Windows Release 빌드와 실장비의 흐름 열거/자동 조건 탐색은 현장 검증이 필요합니다.
+
+
 VisionMaster 4.4.x SDK와 .NET Framework 4.6.1 개발 도구가 설치된 Visual Studio에서 `SC6000_Dual_OperationInterface.sln`을 열어 빌드합니다.
 
 - 저장소는 어느 폴더에 복제해도 됩니다. 최초 빌드 시 `SC6000DualMonitor/config.ini`가 없으면 `config.example.ini`에서 자동 생성합니다. 기존 설정은 덮어쓰지 않습니다.
