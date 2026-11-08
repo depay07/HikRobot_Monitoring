@@ -150,3 +150,19 @@ OK/NG 및 BLOB의 ‘적용 및 카메라 저장’은 카메라에서 조회한
 - 오류 이미지 대기 목록은 최대 64건, 저장 작업은 기존과 같은 최대 8건/64MiB입니다. 저장 형식은 JPG 품질 95이며, 기존 기록은 NG로 읽습니다.
 
 검증: ERROR 콜백 순서/중복 방지, 화면 고정 중 WPF 다음 회차 렌더링·캡처·저장, 최초 화면 유지, 카메라별 확인, 확인 후 이전 비동기 이미지가 다시 화면을 고정하지 않는 동작, ERROR 기록 재조회와 이미지 미수신 안내를 포함해 24개 모의 검사를 통과했습니다. 기존 NG 기능 46개, 비동기 확대 창 13개, SDK 계약 14개 검사 및 Release 빌드도 통과했습니다. 실제 SC6000 카메라/PLC 트리거를 연결한 현장 검증은 포함하지 않습니다.
+
+## CSV 검사 기록 (작업 브랜치: feature/sc6000-live-csv)
+
+각 카메라 영역에 **CSV 기록 저장** 체크박스와 **폴더** 버튼이 추가됩니다.
+
+- 체크 ON: 검사 회차별 Top_Format, Middle_Format, Bottom_Format, Circle_Format 출력 문자열을 묶어 PC CSV 파일에 기록합니다.
+- 체크 OFF: PC 기록만 중지합니다. 카메라 Save Text, Real Time Save, FTP 및 검사 설정은 건드리지 않습니다.
+- 파일 경로: %LOCALAPPDATA%\WILLB\SC6000Monitor\CsvHistory\<카메라 IP>\inspection_YYYY-MM-DD.csv
+- 컬럼: Time,Frame,PART NO,Recipe,Top,Middle,Bottom,Circle,Result,DataStatus
+- 측정 모듈의 출력이 누락되면 빈 셀과 MISSING 상태를 저장하며, 검사 OK/NG 판정은 변경하지 않습니다.
+- 파일 기록은 검사 SDK 콜백과 분리한 전용 스레드에서 처리합니다. 저장 오류 및 큐 초과를 화면에 표시합니다.
+- 체크 상태는 카메라별 enabled.txt 파일에 저장하고 재접속할 때 적용합니다.
+
+주의: 검사 흐름에 네 개의 FORMAT 모듈이 정확한 이름으로 존재하며, 각 모듈 콜백에서 Format Out[] 문자열을 제공해야 합니다. 이름/콜백이 맞지 않으면 체크 ON 시 오류가 표시됩니다.
+
+**검증 제한:** 이 작업은 Windows용 VisionMaster 공급업체 DLL과 SC6000 실장비가 없는 환경에서 수행했으며, Windows Release 빌드 및 실제 카메라 측정값 일치는 아직 검증되지 않았습니다. 운영 투입 전 3회 이상 검사하여 CSV의 Frame 및 측정값과 VisionMaster 결과가 같은지 확인하고, 체크 OFF/ON, 레시피 전환, 재접속, NG 이미지 저장 회귀 테스트를 수행하세요.
