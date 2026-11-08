@@ -123,6 +123,15 @@ namespace SC6000DualMonitor
             _inspectionValidated = false;
             ShowInspectionFeatures(false);
             _inspectionBindingError = null;
+            // The SC6000 currently doesn't expose an active inspection procedure
+            // through the connected remote SDK. Do not attempt unsupported
+            // callbacks or display nonfunctional Count/CSV/NG controls by default.
+            if (!_settings.EnableExperimentalInspection)
+            {
+                ResetCaptureBinding();
+                _solutions.Inspection.Unbind();
+                return;
+            }
             ResetCaptureBinding();
             RemoteInspectionSession inspection = null;
             string path = null;
