@@ -13,7 +13,7 @@ namespace SC6000DualMonitor
 {
     // Captures per-execution FORMAT module outputs without changing camera parameters or Save Text.
     // The four output names are the ones used in the attached SC6000 recipe.
-    internal sealed class CsvInspectionSample
+    internal sealed class CsvInspectionSample : EventArgs
     {
         public uint Frame;
         public DateTime Time;
@@ -292,6 +292,9 @@ namespace SC6000DualMonitor
             // Prevent spreadsheet formula execution when a file is opened in Excel.
             if (s.Length > 0 && (s[0] == '=' || s[0] == '+' || s[0] == '-' || s[0] == '@' ||
                 s[0] == '\t' || s[0] == '\r')) s = "'" + s;
+            double numeric;
+            if (double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out numeric))
+                return s;
             return "\"" + s.Replace("\"", "\"\"") + "\"";
         }
         private void Write(Entry entry)
@@ -301,7 +304,7 @@ namespace SC6000DualMonitor
             string path = Path.Combine(_folder, "inspection_" + item.Time.ToString("yyyy-MM-dd") + ".csv");
             bool header = !File.Exists(path) || new FileInfo(path).Length == 0;
             using (var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read))
-            using (var writer = new StreamWriter(stream, new UTF8Encoding(true)))
+            using (var writer = new StreamWriter(stream, new UTF8Encoding(header)))
             {
                 if (header) writer.WriteLine("Time,Frame,PART NO,Recipe,Top,Middle,Bottom,Circle,Result,DataStatus");
                 string[] v = item.Values ?? new string[4];
