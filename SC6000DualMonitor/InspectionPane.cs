@@ -24,6 +24,7 @@ namespace SC6000DualMonitor
         private volatile string _csvRecipePath = "";
         private string _csvActivationError;
         private bool _updatingCsvCheckbox;
+        private volatile bool _csvActive;
         private readonly Label _state = new Label { Dock = DockStyle.Fill, AutoEllipsis = true, TextAlign = ContentAlignment.MiddleLeft };
         private readonly Label[] _counts = new Label[4];
         private readonly PartNumberStore _store;
@@ -148,7 +149,7 @@ namespace SC6000DualMonitor
         {
             lock (_bindingGate)
             {
-                if (!ReferenceEquals(sender, _session) || !_csvEnabled.Checked) return;
+                if (!ReferenceEquals(sender, _session) || !_csvActive) return;
                 _csvWriter.Enqueue(sample, _csvPartNumber, _csvRecipePath);
             }
         }
@@ -171,11 +172,13 @@ namespace SC6000DualMonitor
                     session.SetCsvCaptureEnabled(false);
                     session.CsvSampleReady -= OnCsvSample;
                 }
+                _csvActive = wanted;
                 _csvPreferences.Write(wanted);
                 _csvActivationError = null;
             }
             catch (Exception ex)
             {
+                _csvActive = false;
                 _csvActivationError = ex.Message;
                 try { session.SetCsvCaptureEnabled(false); } catch { }
                 session.CsvSampleReady -= OnCsvSample;
@@ -188,14 +191,14 @@ namespace SC6000DualMonitor
         }
         private void UpdateCsvStatus()
         {
-            _csvState.Text = _csvActivationError != null ? "CSV 오류 (상세 확인)" :
+            _csvState.Text = _csvActivationError != null ? "CSV 오류: " + _csvActivationError :
                 (_csvEnabled.Checked ? _csvWriter.Status : "CSV 기록 중지");
             _csvState.ForeColor = _csvActivationError != null || _csvWriter.HasError ? Color.Firebrick : Color.DarkGreen;
         }
         public void Unbind()
         {
             RemoteInspectionSession previous;
-            lock (_bindingGate) { previous = _session; _session = null; _counter.Reset(); _lastError = null; }
+            lock (_bindingGate) { previous = _session; _session = null; _csvActive = false; _counter.Reset(); _lastError = null; }
             // Outside the binding lock: Dispose can wait for an SDK callback holding its own lock.
             if (previous != null) { previous.ResultArrived -= OnResult; previous.CsvSampleReady -= OnCsvSample; previous.Dispose(); }
             _csvEnabled.Enabled = false;
