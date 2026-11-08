@@ -106,10 +106,22 @@ namespace SC6000DualMonitor
         public IList<SolutionEntry> List(string currentPath)
         {
             string directory = string.IsNullOrWhiteSpace(_directory) ? SolutionPaths.DirectoryName(currentPath) : _directory;
-            if (string.IsNullOrWhiteSpace(directory))
-                throw new InvalidOperationException("SolutionPath에서 원격 폴더를 확인할 수 없습니다. 실제 카메라 폴더를 SOLUTION_DIRECTORY에 지정하세요.");
-            // Never treat a device drive letter as a local PC directory.
-            return RemoteSolutionFiles.Read(VmSolution.Instance.BaseHandle, directory);
+            if (!string.IsNullOrWhiteSpace(directory))
+                return RemoteSolutionFiles.Read(VmSolution.Instance.BaseHandle, directory);
+
+            // The device may omit IMVS_GetSolutionPath even when .solx files are present.
+            // This directory was confirmed in the user's SC6000 FTP logs. Read/list ONLY:
+            // do not load a recipe or change anything on the camera.
+            const string cameraSolutionsFolder = "/vmfiles/Solutions/";
+            try { return RemoteSolutionFiles.Read(VmSolution.Instance.BaseHandle, cameraSolutionsFolder); }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(
+                    "현재 실행 Solution의 경로가 SDK에서 반환되지 않았습니다. 기본 폴더 " +
+                    cameraSolutionsFolder + " 목록도 조회할 수 없습니다. " +
+                    "카메라에서 실행 중인 레시피를 확인하거나 SOLUTION_DIRECTORY를 지정하세요. " +
+                    "원본 오류: " + ex.Message, ex);
+            }
         }
     }
 
