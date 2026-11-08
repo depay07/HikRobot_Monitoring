@@ -12,7 +12,7 @@ using VM.PlatformSDKCS;
 namespace SC6000DualMonitor
 {
     // Captures per-execution FORMAT module outputs without changing camera parameters or Save Text.
-    // The four output names are the ones used in the attached SC6000 recipe.
+    // Source modules are selected in UI and may be renamed by the operator.
     internal sealed class CsvInspectionSample : EventArgs
     {
         public uint Frame;
@@ -40,7 +40,7 @@ namespace SC6000DualMonitor
             public Delegate Handler;
         }
 
-        private static readonly string[] Names = { "Top_Format", "Middle_Format", "Bottom_Format", "Circle_Format" };
+        private readonly string[] _names;
         private readonly object _gate = new object();
         private readonly Dictionary<object, int> _modules = new Dictionary<object, int>();
         private readonly Dictionary<uint, Pending> _pending = new Dictionary<uint, Pending>();
@@ -51,34 +51,46 @@ namespace SC6000DualMonitor
         private bool _disposed;
         public event Action<CsvInspectionSample> SampleReady;
 
-        public CsvModuleCapture(VmProcedure procedure)
+        private static Dictionary<string, object> Discover(VmProcedure procedure)
         {
-            var discovered = new Dictionary<string, object>(StringComparer.Ordinal);
+            var found = new Dictionary<string, object>(StringComparer.Ordinal);
             var all = procedure.GetAllModuleList();
-            for (int i = 0; i < all.nNum; i++)
+            if (all.astModuleInfo == null) return found;
+            for (int i = 0; i < all.nNum && i < all.astModuleInfo.Length; i++)
             {
                 object module = procedure.GetModuleByID(all.astModuleInfo[i].nModuleID);
                 if (module == null) continue;
-                var property = module.GetType().GetProperty("Name");
+                Type type = module.GetType();
+                if (type.GetEvent("ModuleResultCallBackArrived") == null ||
+                    type.GetMethod("EnableResultCallback", Type.EmptyTypes) == null) continue;
+                var property = type.GetProperty("Name");
                 string name = property == null ? null : property.GetValue(module, null) as string;
-                if (!string.IsNullOrEmpty(name)) discovered[name] = module;
+                if (!string.IsNullOrWhiteSpace(name)) found[name] = module;
             }
-            var missing = Names.Where(n => !discovered.ContainsKey(n)).ToArray();
-            if (missing.Length != 0)
-                throw new InvalidOperationException("CSV 형식화 모듈을 찾을 수 없습니다: " + string.Join(", ", missing) +
-                    ". 현재 검사 흐름에서 Top_Format / Middle_Format / Bottom_Format / Circle_Format 이름을 확인하세요.");
+            return found;
+        }
+        public static string[] ListModuleNames(VmProcedure procedure)
+        {
+            return Discover(procedure).Keys.OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToArray();
+        }
+
+        public CsvModuleCapture(VmProcedure procedure, CsvModuleMapping mapping)
+        {
+            var discovered = Discover(procedure);
+            mapping.Validate(discovered.Keys);
+            _names = (string[])mapping.ModuleNames.Clone();
 
             try
             {
-                for (int i = 0; i < Names.Length; i++)
+                for (int i = 0; i < _names.Length; i++)
                 {
-                    object module = discovered[Names[i]];
+                    object module = discovered[_names[i]];
                     Type type = module.GetType();
                     EventInfo ev = type.GetEvent("ModuleResultCallBackArrived");
                     MethodInfo enable = type.GetMethod("EnableResultCallback", Type.EmptyTypes);
                     MethodInfo handler = GetType().GetMethod("OnModuleResult", BindingFlags.NonPublic | BindingFlags.Instance);
                     if (ev == null || enable == null || handler == null)
-                        throw new InvalidOperationException(Names[i] + ": SDK 결과 콜백 API를 사용할 수 없습니다.");
+                        throw new InvalidOperationException(_names[i] + ": SDK 결과 콜백 API를 사용할 수 없습니다.");
                     Delegate subscription = Delegate.CreateDelegate(ev.EventHandlerType, this, handler);
                     ev.AddEventHandler(module, subscription);
                     _subscriptions.Add(new Subscription { Module = module, Event = ev, Handler = subscription });
@@ -159,7 +171,7 @@ namespace SC6000DualMonitor
             _emitted.Add(entry.Frame);
             _emittedOrder.Enqueue(entry.Frame);
             while (_emittedOrder.Count > 2048) _emitted.Remove(_emittedOrder.Dequeue());
-            var missing = Names.Where((n, i) => entry.Values[i] == null).ToArray();
+            var missing = _names.Where((n, i) => entry.Values[i] == null).ToArray();
             return new CsvInspectionSample
             {
                 Frame = entry.Frame, Time = entry.Time == default(DateTime) ? DateTime.Now : entry.Time,
