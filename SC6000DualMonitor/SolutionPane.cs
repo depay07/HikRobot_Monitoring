@@ -86,8 +86,9 @@ namespace SC6000DualMonitor
         private void DisplayCurrent(string path)
         {
             _currentPath = path;
-            _current.Text = "Solution: " + (string.IsNullOrWhiteSpace(path) ? "실행 경로 미제공" : SolutionPaths.FileName(path));
-            _tip.SetToolTip(_current, path ?? string.Empty);
+            _current.Text = string.IsNullOrWhiteSpace(path) ? "Solution: —" : "Solution: " + SolutionPaths.FileName(path);
+            _tip.SetToolTip(_current, string.IsNullOrWhiteSpace(path)
+                ? "SDK가 카메라의 현재 실행 Solution 경로를 반환하지 않았습니다." : path);
             UpdateEnabled();
         }
         private string ReadCurrent()
@@ -95,16 +96,16 @@ namespace SC6000DualMonitor
             try
             {
                 DisplayCurrent(_controller.CurrentPath);
-                return string.IsNullOrWhiteSpace(_currentPath) ? "현재 실행 Solution 경로를 SDK가 제공하지 않았습니다." : string.Empty;
+                return string.Empty;
             }
             catch (Exception ex)
             {
                 DisplayCurrent(null);
-                _current.Text = "Solution: 경로 조회 실패";
+                _current.Text = "Solution: —";
                 string error = "현재 실행 Solution 조회 실패: " + Describe(ex);
                 _tip.SetToolTip(_current, error);
-                SetState(error);
-                return error;
+                System.Diagnostics.Trace.WriteLine(error);
+                return string.Empty;
             }
         }
         private void SetState(string value) { _state.Text = value; _tip.SetToolTip(_state, value); }
@@ -128,7 +129,7 @@ namespace SC6000DualMonitor
             {
                 // Frontend only: never load the startup recipe, reset counts or restart acquisition.
                 _reloadFrontend();
-                state = "화면 다시 읽기 완료. 다음 검사 영상과 Errors를 확인하세요.";
+                state = "화면 다시 읽기 완료. 다음 영상을 확인하세요.";
             }
             catch (Exception ex)
             {
@@ -153,14 +154,21 @@ namespace SC6000DualMonitor
                     foreach (var entry in entries) _choices.Items.Add(entry);
                     foreach (SolutionEntry entry in _choices.Items)
                         if (SolutionPaths.Same(entry.Path, selected ?? _currentPath)) { _choices.SelectedItem = entry; break; }
-                    state = entries.Count == 0 ? ".sol / .solx 파일이 없습니다." : entries.Count + "개 Solution";
-                    if (!string.IsNullOrEmpty(currentWarning)) state += " / " + currentWarning;
+                    bool usable = entries.Count != 0;
+                    _choices.Visible = usable;
+                    _refresh.Visible = usable;
+                    _change.Visible = usable;
+                    state = usable ? entries.Count + "개 Solution" : string.Empty;
+                    if (usable && !string.IsNullOrEmpty(currentWarning)) state += " / " + currentWarning;
                 }
                 catch (Exception ex)
                 {
                     _choices.Items.Clear();
-                    state = "목록 조회 실패: " + Describe(ex);
-                    if (!initial) MessageBox.Show(this, state, "WILLB | Solution 목록", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    string detail = "목록 조회 실패: " + Describe(ex);
+                    _choices.Visible = _refresh.Visible = _change.Visible = false;
+                    System.Diagnostics.Trace.WriteLine(detail);
+                    state = string.Empty;
+                    if (!initial) MessageBox.Show(this, detail, "WILLB | Solution 목록", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
                 finally { SetBusy(false, state); }
             }));
