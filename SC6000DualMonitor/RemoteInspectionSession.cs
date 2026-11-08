@@ -87,14 +87,31 @@ namespace SC6000DualMonitor
             var available = new List<string>();
             var targets = new List<InspectionTarget>();
             var failures = new List<string>();
-            if (list.astProcessInfo == null || list.nNum == 0)
-                throw new InvalidOperationException("카메라의 실행 중인 레시피에서 검사 흐름을 찾지 못했습니다.");
-            for (int p = 0; p < list.nNum && p < list.astProcessInfo.Length; p++)
+            var procedureNames = new List<string>();
+            if (list.astProcessInfo != null)
             {
-                string name = list.astProcessInfo[p].strProcessName;
-                if (string.IsNullOrWhiteSpace(name)) continue;
-                VmProcedure procedure = VmSolution.Instance[name] as VmProcedure;
-                if (procedure == null) continue;
+                for (int p = 0; p < list.nNum && p < list.astProcessInfo.Length; p++)
+                {
+                    string name = list.astProcessInfo[p].strProcessName;
+                    if (!string.IsNullOrWhiteSpace(name) && !procedureNames.Contains(name))
+                        procedureNames.Add(name);
+                }
+            }
+            if (procedureNames.Count == 0)
+            {
+                // The user's existing 01.solx uses Proc1. The remote SDK may have
+                // a working indexer even when its procedure enumeration is empty.
+                // A failed lookup is harmless; it does not load/modify any recipe.
+                if (!string.IsNullOrWhiteSpace(preferredProcedure))
+                    procedureNames.Add(preferredProcedure.Trim());
+                if (!procedureNames.Contains("Proc1")) procedureNames.Add("Proc1");
+            }
+            foreach (string name in procedureNames)
+            {
+                VmProcedure procedure;
+                try { procedure = VmSolution.Instance[name] as VmProcedure; }
+                catch (Exception ex) { failures.Add("검사 흐름 조회 " + name + ": " + ex.Message); continue; }
+                if (procedure == null) { failures.Add("검사 흐름 조회 " + name + ": SDK에서 객체 미제공"); continue; }
                 available.Add(name);
                 var modules = procedure.GetAllModuleList();
                 if (modules.astModuleInfo == null) continue;
@@ -123,9 +140,13 @@ namespace SC6000DualMonitor
                 }
             }
             if (targets.Count == 0)
-                throw new InvalidOperationException("Condition Detection 조건 모듈을 자동으로 찾지 못했습니다." +
-                    "\r\n검색한 흐름: " + string.Join(", ", available) +
-                    "\r\nVisionMaster에서 해당 검사 흐름의 Condition Detection에 숫자 Min/Max 조건이 있는지 확인하세요.");
+                throw new InvalidOperationException("카메라 SDK에서 사용할 수 있는 검사 흐름/Condition Detection 모듈을 찾지 못했습니다." +
+                    "\r\nSDK 흐름 목록 수: " + list.nNum +
+                    " / 검사한 이름: " + string.Join(", ", procedureNames) +
+                    "\r\n열린 흐름: " + (available.Count == 0 ? "없음" : string.Join(", ", available)) +
+                    "\r\n상세: " + (failures.Count == 0 ? "결과 없음" : string.Join(" | ", failures.Take(5))) +
+                    "\r\n실행 중 Solution의 경로도 미제공된다면, VisionMaster에서 카메라에 실제로 레시피가 실행 중인지 확인하세요. " +
+                    "이 프로그램은 검사 레시피를 자동 로드하거나 변경하지 않습니다.");
 
             string pp = (preferredProcedure ?? "").Trim();
             string pc = (preferredCondition ?? "").Trim();
