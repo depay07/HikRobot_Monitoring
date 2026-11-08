@@ -132,7 +132,9 @@ namespace SC6000DualMonitor
                 _solutions.Inspection.Bind(inspection, path);
                 _boundRecipe = path; _captureSession = inspection;
                 inspection.NgCaptureRequested += OnNgCapture;
-                ShowInspectionFeatures(true);
+                // A valid SDK object is not enough. Reveal optional panels only
+                // after this camera actually delivers an OK/NG result callback.
+                inspection.ResultArrived += OnFirstValidInspection;
             }
             catch (Exception ex)
             {
@@ -144,6 +146,18 @@ namespace SC6000DualMonitor
                 ShowInspectionFeatures(false);
                 Trace.WriteLine("Inspection SDK unavailable; preview only: " + ex);
             }
+        }
+
+        private void OnFirstValidInspection(object sender, InspectionResultEventArgs result)
+        {
+            if (result.Outcome != InspectionOutcome.Ok && result.Outcome != InspectionOutcome.Ng) return;
+            PostUI(delegate
+            {
+                if (!ReferenceEquals(sender, _captureSession)) return;
+                _captureSession.ResultArrived -= OnFirstValidInspection;
+                ShowInspectionFeatures(true);
+                AttachCapture();
+            });
         }
 
         private void QueueFrontendResize()
@@ -287,7 +301,11 @@ namespace SC6000DualMonitor
         }
         private void ResetCaptureBinding()
         {
-            if (_captureSession != null) _captureSession.NgCaptureRequested -= OnNgCapture;
+            if (_captureSession != null)
+            {
+                _captureSession.NgCaptureRequested -= OnNgCapture;
+                _captureSession.ResultArrived -= OnFirstValidInspection;
+            }
             _captureSession = null;
             if (_pendingCaptures.Count > 0) { _missed += _pendingCaptures.Count; _film.SetStatus("레시피 전환으로 미완료 NG 캡처 " + _pendingCaptures.Count + "건 취소 / 누락 " + _missed); }
             _pendingCaptures.Clear(); _boundRecipe = null;
