@@ -90,6 +90,8 @@
     <Compile Include="ConditionParameterReader.cs" />
     <Compile Include="RemoteInspectionSession.cs" />
     <Compile Include="InspectionPane.cs" />
+    <Compile Include="CsvLogging.cs" />
+    <Compile Include="CsvModuleMapping.cs" />
     <Compile Include="InspectionSetupForm.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>

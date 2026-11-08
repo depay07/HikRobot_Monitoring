@@ -20,6 +20,8 @@ namespace SC6000DualMonitor
         public string TargetDescription { get { return _cameraIp + " | " + _procedure.Name + " / " + _condition.Name + " (ID " + _condition.ModuParams.ModuleID + ")"; } }
         private readonly IList<ConditionDefinition> _definitions;
         private readonly object _callbackGate = new object();
+        private CsvModuleCapture _csvCapture;
+        public event EventHandler<CsvInspectionSample> CsvSampleReady;
         private bool _disposed, _paused, _wasContinuous, _wasEnabled;
         public event EventHandler<InspectionResultEventArgs> ResultArrived;
         public event EventHandler<NgCaptureEventArgs> NgCaptureRequested;
@@ -135,10 +137,50 @@ namespace SC6000DualMonitor
                     snapshot = new InspectionResultEventArgs(InspectionOutcome.Error, "결과 읽기 오류: " + ex.Message);
                     if (callback != null && _ngFrames.Record(callback.ExecuteCount, null, false)) RequestCapture(callback.ExecuteCount, snapshot.Detail);
                 }
+                // CSV must never interrupt counters or NG/ERROR capture.
+                try { if (callback != null && _csvCapture != null) _csvCapture.ProcedureFinished(callback.ExecuteCount, snapshot.Outcome); }
+                catch (Exception ex) { System.Diagnostics.Trace.WriteLine("CSV completion: " + ex); }
                 var handler = ResultArrived;
                 if (handler != null) handler(this, snapshot);
             }
         }
+        // Called only when the operator opts in. No camera recipe/Save Text parameters are changed.
+        public string CsvProcedureName { get { return _procedure.Name; } }
+        public string[] ListCsvModuleNames() { return CsvModuleCapture.ListModuleNames(_procedure); }
+        public void SetCsvCaptureEnabled(bool enabled, CsvModuleMapping mapping = null)
+        {
+            if (enabled)
+            {
+                lock (_callbackGate)
+                {
+                    if (_disposed) throw new ObjectDisposedException("RemoteInspectionSession");
+                    if (_csvCapture != null) return;
+                }
+                if (mapping == null) throw new InvalidOperationException("CSV 항목 설정을 먼저 완료하세요.");
+                var created = new CsvModuleCapture(_procedure, mapping);
+                created.SampleReady += OnCsvSample;
+                bool accepted = false;
+                lock (_callbackGate)
+                {
+                    if (!_disposed && _csvCapture == null) { _csvCapture = created; accepted = true; }
+                }
+                if (!accepted) created.Dispose();
+                if (!accepted) throw new InvalidOperationException("CSV 수집을 시작할 수 없습니다. 카메라 연결을 확인하세요.");
+            }
+            else
+            {
+                CsvModuleCapture previous;
+                lock (_callbackGate) { previous = _csvCapture; _csvCapture = null; }
+                if (previous != null) previous.Dispose();
+            }
+        }
+
+        private void OnCsvSample(CsvInspectionSample sample)
+        {
+            var handler = CsvSampleReady;
+            if (handler != null) handler(this, sample);
+        }
+
         private string ReadExecutionError()
         {
             const string summary = "검사 흐름 실행 오류";
@@ -227,7 +269,9 @@ namespace SC6000DualMonitor
         }
         public void Dispose()
         {
-            lock (_callbackGate) { _disposed = true; ResultArrived = null; NgCaptureRequested = null; _ngFrames.Clear(); }
+            lock (_callbackGate) _disposed = true;
+            SetCsvCaptureEnabled(false);
+            lock (_callbackGate) { CsvSampleReady = null; ResultArrived = null; NgCaptureRequested = null; _ngFrames.Clear(); }
             _procedure.ModuleResultCallBackArrived -= OnProcedureCompleted;
             _condition.ModuleResultCallBackArrived -= OnConditionResult;
             // Do not DisableModulesCallback: the embedded frontend also uses SDK callbacks.
