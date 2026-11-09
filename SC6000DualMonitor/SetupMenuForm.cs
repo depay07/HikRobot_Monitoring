@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
@@ -11,12 +11,13 @@ namespace SC6000DualMonitor
         {
             Text = settings.Title + " | Set Up";
             StartPosition = FormStartPosition.CenterParent;
-            ClientSize = new Size(420, 230);
+            ClientSize = new Size(440, 290);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false; MinimizeBox = false; ShowInTaskbar = false;
             Font = new Font("Segoe UI", 10);
-            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(16), ColumnCount = 1, RowCount = 4 };
+            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(16), ColumnCount = 1, RowCount = 5 };
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
@@ -24,7 +25,14 @@ namespace SC6000DualMonitor
             var conditions = new Button { Text = "OK/NG 설정 조건", Dock = DockStyle.Fill };
             var blob = new Button { Text = "BLOB 조건 설정", Dock = DockStyle.Fill };
             var close = new Button { Text = "닫기", Dock = DockStyle.Right, DialogResult = DialogResult.Cancel };
-            layout.Controls.Add(conditions, 0, 1); layout.Controls.Add(blob, 0, 2); layout.Controls.Add(close, 0, 3);
+            layout.Controls.Add(conditions, 0, 1); layout.Controls.Add(blob, 0, 2); layout.Controls.Add(close, 0, 4);
+            var calibration = new Button { Text = "치수 보정", Dock = DockStyle.Fill };
+            layout.Controls.Add(calibration, 0, 3);
+            calibration.Click += delegate
+            {
+                try { using (var target = session.OpenCalibration()) using (var form = new CalibrationForm(target, settings.Title)) form.ShowDialog(this); }
+                catch (Exception ex) { MessageBox.Show(this, ex.Message, "치수 보정", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+            };
             Controls.Add(layout); CancelButton = close;
             conditions.Click += delegate { using (var form = new InspectionSetupForm(session, settings.Title)) form.ShowDialog(this); };
             blob.Click += delegate { using (var form = new BlobSetupForm(settings.Title, delegate {

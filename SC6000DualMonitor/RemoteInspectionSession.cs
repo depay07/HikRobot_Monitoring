@@ -34,6 +34,8 @@ namespace SC6000DualMonitor
                 " / NG 캡처 요청: " + _captureRequests + "\r\n결과 수신 제외 상태: " + _paused; }
         }
         public string CameraProcedureDescription { get { return _cameraIp + " | " + _procedure.Name; } }
+        public bool IsClosed { get { lock (_callbackGate) return _disposed; } }
+        public RemoteCalibrationSession OpenCalibration() { return new RemoteCalibrationSession(this, _procedure); }
         public IList<BlobModuleChoice> GetBlobModules()
         {
             var result = new List<BlobModuleChoice>();
