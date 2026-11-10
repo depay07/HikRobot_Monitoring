@@ -95,7 +95,17 @@ namespace SC6000DualMonitor
             foreach (var name in names)
             {
                 try { json.Add(((IUserStringData)_calculator.Params)[name]); }
-                catch (Exception ex) { throw new InvalidOperationException("Calculator 항목 읽기 실패: " + name + ". 전체 항목을 보존할 수 없어 적용하지 않습니다.", ex); }
+                catch (Exception ex)
+                {
+                    var sdk = ex as VmException;
+                    string detail = sdk == null ? ex.Message : "SDK 0x" + unchecked((uint)sdk.errorCode).ToString("X8") + " / " + ex.Message;
+                    throw new InvalidOperationException("Calculator 항목 읽기 실패: " + name +
+                        "\r\n대상: " + Description + " (ID " + _calculator.ID + ")" +
+                        "\r\n레시피: " + _recipePath +
+                        "\r\n원인: " + detail +
+                        "\r\n조회된 항목: " + string.Join(", ", names) +
+                        "\r\n전체 항목을 읽지 못해 보정값을 변경하지 않았습니다.", ex);
+                }
             }
             return new CalibrationModel(json.ToArray(), Baseline == null ? null : Baseline.Names);
         }

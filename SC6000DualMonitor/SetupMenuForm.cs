@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
@@ -36,7 +36,12 @@ namespace SC6000DualMonitor
                     if (moduleName == null) return;
                     using (var target = session.OpenCalibration(moduleName)) using (var form = new CalibrationForm(target, settings.Title)) form.ShowDialog(this);
                 }
-                catch (Exception ex) { MessageBox.Show(this, ex.Message, "치수 보정", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+                catch (Exception ex)
+                {
+                    CameraLog.Write(settings.Ip, "CalibrationOpenFailed", ex.ToString());
+                    MessageBox.Show(this, ex.Message + "\r\n\r\n진단 로그: " + CameraLog.PathFor(settings.Ip),
+                        "치수 보정", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
             };
             Controls.Add(layout); CancelButton = close;
             conditions.Click += delegate { using (var form = new InspectionSetupForm(session, settings.Title)) form.ShowDialog(this); };
