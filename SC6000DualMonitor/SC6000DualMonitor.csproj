@@ -91,6 +91,7 @@
     <Compile Include="BlobSetupForm.cs" />
     <Compile Include="SetupMenuForm.cs" />
     <Compile Include="CalibrationModel.cs" />
+    <Compile Include="CalibrationDeviceData.cs" />
     <Compile Include="RemoteCalibrationSession.cs" />
     <Compile Include="CalibrationForm.cs" />
     <Compile Include="ConditionParameterReader.cs" />

@@ -12,6 +12,8 @@ namespace SC6000DualMonitor
     {
         private readonly RemoteInspectionSession _owner;
         private readonly CalculatorModuleTool _calculator;
+        private readonly VmProcedure _procedure;
+        private readonly ImvsSdkDefine.IMVS_SUBSCRIBE_INFO[] _links;
         private readonly VmModule[] _sources;
         private readonly string[] _fields;
         private readonly object _gate = new object();
@@ -38,24 +40,27 @@ namespace SC6000DualMonitor
         }
         public RemoteCalibrationSession(RemoteInspectionSession owner, VmProcedure procedure, string moduleName = null)
         {
-            _owner = owner;
+            _owner = owner; _procedure = procedure;
             _recipePath = _solution.CurrentPath;
             if (string.IsNullOrWhiteSpace(_recipePath)) throw new InvalidOperationException("현재 카메라 레시피 경로를 확인할 수 없습니다. 보정값은 변경하지 않았습니다.");
             var modules = Modules(procedure);
             if (moduleName != null) modules = modules.Where(m => m.Name == moduleName).ToList();
             if (modules.Count != 1) throw new InvalidOperationException("보정할 Variable Calculation 모듈을 선택하세요. 조회된 모듈: " + string.Join(", ", modules.Select(m => m.Name)));
             _calculator = modules[0];
+            _binding = BindingSignature();
+            _links = CalibrationDeviceData.Subscriptions(_calculator);
             var all = ReadModel();
             var supported = Enumerable.Range(0, all.Count).Where(i => Source(all.Inputs[i]) != null).Select(i => all.Names[i]).ToArray();
             if (supported.Length == 0) throw new InvalidOperationException("Calculator에서 선 간 거리 또는 원 반지름에 연결된 보정 항목을 찾지 못했습니다. 조회된 항목: " + string.Join(", ", all.Names));
             Baseline = all.Select(supported);
-            _binding = BindingSignature();
             _sources = new VmModule[Baseline.Count]; _fields = new string[Baseline.Count];
             _frames = new CalibrationFrameCollector(Baseline.Count);
             for (int i = 0; i < Baseline.Count; i++)
             {
                 var source = Source(Baseline.Inputs[i]);
-                _sources[i] = source.Root; _fields[i] = source.Name;
+                _sources[i] = _procedure.GetModuleByID(source.Value.nPubModuleID);
+                if (_sources[i] == null) throw new InvalidOperationException("측정 모듈을 찾지 못했습니다: " + source.Value.nPubModuleID);
+                _fields[i] = CalibrationDeviceData.Text(source.Value.strPubOutput);
             }
             try
             {
@@ -70,45 +75,39 @@ namespace SC6000DualMonitor
         }
         private string BindingSignature()
         {
-            return string.Join(";", _calculator.Inputs.GetAllIO().OrderBy(x => x.Name).Select(x => x.Name + "=" +
-                (x.RelateIO == null ? "" : x.RelateIO.Root.ID + ":" + x.RelateIO.Name)));
+            return CalibrationDeviceData.BindingSignature(_calculator);
         }
         private void VerifyRecipe()
         {
             if (_owner.IsClosed || !string.Equals(_recipePath, _solution.CurrentPath, StringComparison.Ordinal))
                 throw new InvalidOperationException("카메라 연결 또는 레시피가 변경되었습니다. 보정 창을 다시 여세요.");
         }
-        private VmIO Source(string inputName)
+        private ImvsSdkDefine.IMVS_SUBSCRIBE_INFO? Source(string inputName)
         {
-            var input = _calculator.Inputs.GetAllIO().SingleOrDefault(x => x.Name.Trim('%') == inputName);
-            var source = input == null ? null : input.RelateIO;
-            return source != null && source.Root != null && (source.Name == "L2LAbsDist" || source.Name == "CircleRadius") ? source : null;
+            return CalibrationDeviceData.MeasurementSource(_calculator.ID, inputName, _links);
         }
         public CalibrationModel ReadModel()
         {
             VerifyRecipe();
-            // Use the Calculator UI's top-level dynamic output inventory, not legacy output names.
-            var names = _calculator.Outputs.Where(o => o is DynamicVmIO && !o.IsResultShow).Select(o => o.Name.Trim('%')).ToArray();
             if (_binding != null && BindingSignature() != _binding) throw new InvalidOperationException("Calculator의 측정값 연결이 변경되었습니다. 보정 창을 다시 여세요.");
-            // Read EVERY item: skipping an unreadable item could delete it during command#start/data.
-            var json = new List<string>();
-            foreach (var name in names)
+            var model = CalibrationDeviceData.ReadItems(() => CalibrationDeviceData.Outputs(_calculator), name =>
             {
-                try { json.Add(((IUserStringData)_calculator.Params)[name]); }
+                try { return ((IUserStringData)_calculator.Params)[name]; }
                 catch (Exception ex)
                 {
                     var sdk = ex as VmException;
                     string detail = sdk == null ? ex.Message : "SDK 0x" + unchecked((uint)sdk.errorCode).ToString("X8") + " / " + ex.Message;
                     throw new InvalidOperationException("Calculator 항목 읽기 실패: " + name +
                         "\r\n대상: " + Description + " (ID " + _calculator.ID + ")" +
-                        "\r\n레시피: " + _recipePath +
-                        "\r\n원인: " + detail +
-                        "\r\n조회된 항목: " + string.Join(", ", names) +
+                        "\r\n레시피: " + _recipePath + "\r\n원인: " + detail +
                         "\r\n전체 항목을 읽지 못해 보정값을 변경하지 않았습니다.", ex);
                 }
-            }
-            return new CalibrationModel(json.ToArray(), Baseline == null ? null : Baseline.Names);
+            }, Baseline == null ? null : Baseline.Names);
+            VerifyRecipe();
+            if (_binding != null && BindingSignature() != _binding) throw new InvalidOperationException("조회 중 측정값 연결이 변경되었습니다. 보정 창을 다시 여세요.");
+            return model;
         }
+
         public void Arm()
         {
             lock (_gate) { _armed = false; _ready = null; _frames.Clear(); }
