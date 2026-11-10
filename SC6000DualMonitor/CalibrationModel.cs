@@ -9,59 +9,65 @@ namespace SC6000DualMonitor
 {
     internal sealed class CalibrationModel
     {
-        public static readonly string[] Names = { "top_size", "middle_size", "bottom_size", "circle_size" };
-        public static readonly string[] Captions = { "상단 치수", "중간 치수", "하단 치수", "원 지름" };
         private readonly Dictionary<string, object>[] _items;
-        public readonly string[] Inputs = new string[4];
-        public readonly string[] Prefixes = new string[4];
-        public readonly double[] Factors = new double[4];
+        private readonly int[] _selected;
+        public readonly string[] Names, Inputs, Prefixes;
+        public readonly double[] Factors;
+        public int Count { get { return Names.Length; } }
+        public int PreservedCount { get { return _items.Length - Count; } }
         private static readonly Regex Formula = new Regex(@"^(?<prefix><float:<base64 (?<input>[A-Za-z0-9+/=]+) />>\[0\]\s*\*\s*)(?<factor>[0-9.eE+\-]+)$");
-        public CalibrationModel(string[] json)
+        public CalibrationModel(string[] json, string[] selectedNames = null)
         {
-            if (json == null || json.Length != 4) throw new InvalidOperationException("치수 보정은 지정된 4개 계산 항목이 있는 레시피만 지원합니다.");
+            if (json == null || json.Length == 0) throw new InvalidOperationException("Calculator 계산 항목을 읽지 못했습니다.");
             var serializer = new JavaScriptSerializer();
-            _items = new Dictionary<string, object>[4];
-            for (int i = 0; i < 4; i++)
+            _items = json.Select(j => serializer.Deserialize<Dictionary<string, object>>(j)).OrderBy(x => Convert.ToInt32(x["Index"])).ToArray();
+            if (_items.Any(x => !x.ContainsKey("Name") || !x.ContainsKey("Expression") || !x.ContainsKey("Type")) ||
+                _items.Select(x => Convert.ToString(x["Name"])).Distinct(StringComparer.Ordinal).Count() != _items.Length ||
+                _items.Select(x => Convert.ToInt32(x["Index"])).Distinct().Count() != _items.Length)
+                throw new InvalidOperationException("Calculator 이름 또는 순서가 중복되어 있습니다.");
+            var selected = new List<int>();
+            for (int i = 0; i < _items.Length; i++)
             {
-                var item = serializer.Deserialize<Dictionary<string, object>>(json[i]);
-                if (Convert.ToString(item["Name"]) != Names[i] || Convert.ToString(item["Type"]) != "float")
-                    throw new InvalidOperationException("Calculator 항목 이름/형식 불일치: " + Names[i]);
-                var match = Formula.Match(Convert.ToString(item["Expression"]));
+                string name = Convert.ToString(_items[i]["Name"]);
+                if (selectedNames != null && !selectedNames.Contains(name, StringComparer.Ordinal)) continue;
                 double factor;
-                if (!match.Success || !double.TryParse(match.Groups["factor"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out factor) || !Positive(factor))
-                    throw new InvalidOperationException(Captions[i] + ": '픽셀값 × 보정계수' 형태가 아닙니다. 기존 계산식은 변경하지 않았습니다.");
-                _items[i] = item; Factors[i] = factor; Inputs[i] = match.Groups["input"].Value; Prefixes[i] = match.Groups["prefix"].Value;
+                var match = Formula.Match(Convert.ToString(_items[i]["Expression"]));
+                bool valid = Convert.ToString(_items[i]["Type"]) == "float" && match.Success &&
+                    double.TryParse(match.Groups["factor"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out factor) && Positive(factor);
+                if (valid) selected.Add(i);
+                else if (selectedNames != null) throw new InvalidOperationException(name + ": 보정 대상 계산식이 변경되었습니다. 다시 읽으세요.");
             }
-            if (!_items.Select(x => Convert.ToInt32(x["Index"])).OrderBy(x => x).SequenceEqual(new[] { 0, 1, 2, 3 }))
-                throw new InvalidOperationException("Calculator 항목 순서가 중복되어 있습니다.");
+            _selected = selected.ToArray();
+            Names = _selected.Select(i => Convert.ToString(_items[i]["Name"])).ToArray();
+            if (Names.Length == 0 || (selectedNames != null && !Names.OrderBy(n => n).SequenceEqual(selectedNames.OrderBy(n => n))))
+                throw new InvalidOperationException("보정 가능한 '픽셀값 × 양수 계수' 항목을 찾지 못했습니다.");
+            var matches = _selected.Select(i => Formula.Match(Convert.ToString(_items[i]["Expression"]))).ToArray();
+            Inputs = matches.Select(m => m.Groups["input"].Value).ToArray();
+            Prefixes = matches.Select(m => m.Groups["prefix"].Value).ToArray();
+            Factors = matches.Select(m => double.Parse(m.Groups["factor"].Value, CultureInfo.InvariantCulture)).ToArray();
         }
+        public CalibrationModel Select(string[] names) { return new CalibrationModel(JsonInOrder(), names); }
         public static bool Positive(double value) { return value > 0 && !double.IsNaN(value) && !double.IsInfinity(value); }
         public CalibrationModel Calculate(double[] pixels, double[] actual)
         {
-            if (pixels == null || actual == null || pixels.Length != 4 || actual.Length != 4) throw new InvalidOperationException("4개 항목의 측정값과 실제 치수가 필요합니다.");
+            if (pixels == null || actual == null || pixels.Length != Count || actual.Length != Count) throw new InvalidOperationException("표시된 보정 항목의 측정값과 실제 치수를 입력하세요.");
             var serializer = new JavaScriptSerializer();
-            var json = new string[4];
-            for (int i = 0; i < 4; i++)
+            var copies = _items.Select(x => new Dictionary<string, object>(x)).ToArray();
+            for (int i = 0; i < Count; i++)
             {
-                if (!Positive(pixels[i]) || !Positive(actual[i])) throw new InvalidOperationException(Captions[i] + ": 픽셀값과 실제 치수는 0보다 큰 유효한 값이어야 합니다.");
-                double factor = actual[i] / pixels[i]; // Circle input is radius; actual entry is diameter. No extra factor of two.
+                if (!Positive(pixels[i]) || !Positive(actual[i])) throw new InvalidOperationException(Names[i] + ": 픽셀값과 실제 치수는 0보다 큰 유효한 값이어야 합니다.");
+                double factor = actual[i] / pixels[i];
                 if (!Positive(factor) || factor > float.MaxValue || factor < float.Epsilon) throw new InvalidOperationException("보정계수가 카메라의 계산 범위를 벗어납니다.");
-                var item = new Dictionary<string, object>(_items[i]);
-                item["Expression"] = Prefixes[i] + factor.ToString("R", CultureInfo.InvariantCulture);
-                json[i] = serializer.Serialize(item);
+                copies[_selected[i]]["Expression"] = Prefixes[i] + factor.ToString("R", CultureInfo.InvariantCulture);
             }
-            return new CalibrationModel(json);
+            return new CalibrationModel(copies.Select(serializer.Serialize).ToArray(), Names);
         }
-        public string[] JsonInOrder()
-        {
-            var serializer = new JavaScriptSerializer();
-            return _items.OrderBy(x => Convert.ToInt32(x["Index"])).Select(serializer.Serialize).ToArray();
-        }
+        public string[] JsonInOrder() { return _items.Select(new JavaScriptSerializer().Serialize).ToArray(); }
         public bool Same(CalibrationModel other)
         {
-            if (other == null) return false;
+            if (other == null || _items.Length != other._items.Length || !Names.SequenceEqual(other.Names)) return false;
             var serializer = new JavaScriptSerializer();
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < _items.Length; i++)
             {
                 if (!_items[i].Keys.OrderBy(k => k).SequenceEqual(other._items[i].Keys.OrderBy(k => k))) return false;
                 foreach (string key in _items[i].Keys)
@@ -87,6 +93,7 @@ namespace SC6000DualMonitor
     {
         string Description { get; }
         CalibrationModel Baseline { get; }
+        bool[] RadiusInputs { get; }
         void Arm();
         CalibrationFrame TakeFrame();
         void CancelRead();
@@ -138,15 +145,18 @@ namespace SC6000DualMonitor
     // Bounded join of the four source measurements; never mix execution numbers.
     internal sealed class CalibrationFrameCollector
     {
+        private readonly int _count;
+        public CalibrationFrameCollector() : this(4) { }
+        public CalibrationFrameCollector(int count) { if (count < 1) throw new ArgumentOutOfRangeException("count"); _count = count; }
         private readonly Dictionary<uint, double[]> _pending = new Dictionary<uint, double[]>();
         public CalibrationFrame Add(uint frame, int slot, double value)
         {
-            if (slot < 0 || slot >= 4 || !CalibrationModel.Positive(value)) return null;
+            if (slot < 0 || slot >= _count || !CalibrationModel.Positive(value)) return null;
             double[] values;
             if (!_pending.TryGetValue(frame, out values))
             {
                 if (_pending.Count >= 64) _pending.Clear();
-                values = new double[4]; _pending.Add(frame, values);
+                values = new double[_count]; _pending.Add(frame, values);
             }
             values[slot] = value;
             if (values.Any(v => v <= 0)) return null;

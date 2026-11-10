@@ -35,7 +35,8 @@ namespace SC6000DualMonitor
         }
         public string CameraProcedureDescription { get { return _cameraIp + " | " + _procedure.Name; } }
         public bool IsClosed { get { lock (_callbackGate) return _disposed; } }
-        public RemoteCalibrationSession OpenCalibration() { return new RemoteCalibrationSession(this, _procedure); }
+        public string[] CalibrationModules() { return RemoteCalibrationSession.Modules(_procedure).Select(m => m.Name).ToArray(); }
+        public RemoteCalibrationSession OpenCalibration(string moduleName = null) { return new RemoteCalibrationSession(this, _procedure, moduleName); }
         public IList<BlobModuleChoice> GetBlobModules()
         {
             var result = new List<BlobModuleChoice>();

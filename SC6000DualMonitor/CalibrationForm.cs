@@ -8,8 +8,8 @@ namespace SC6000DualMonitor
     internal sealed class CalibrationForm : Form
     {
         private readonly ICalibrationEditorSession _session;
-        private readonly NumericUpDown[] _actual = new NumericUpDown[4];
-        private readonly Label[] _pixels = new Label[4], _factors = new Label[4];
+        private readonly NumericUpDown[] _actual;
+        private readonly Label[] _pixels, _factors;
         private readonly Label _status = new Label { Dock = DockStyle.Fill, AutoSize = false };
         private readonly Button _read = new Button { Text = "기준 측정값 읽기", AutoSize = true };
         private readonly Button _apply = new Button { Text = "적용 및 카메라 저장", AutoSize = true, Enabled = false };
@@ -21,8 +21,10 @@ namespace SC6000DualMonitor
         public CalibrationForm(ICalibrationEditorSession session, string title)
         {
             _session = session;
+            int count = session.Baseline.Count;
+            _actual = new NumericUpDown[count]; _pixels = new Label[count]; _factors = new Label[count];
             Text = title + " | 치수 보정";
-            ClientSize = new Size(860, 430); MinimumSize = new Size(840, 440);
+            ClientSize = new Size(960, Math.Min(720, 270 + count * 42)); MinimumSize = new Size(900, 440);
             StartPosition = FormStartPosition.CenterParent; Font = new Font("Segoe UI", 10);
             MinimizeBox = false; MaximizeBox = false;
             var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(14), ColumnCount = 1, RowCount = 4 };
@@ -30,15 +32,15 @@ namespace SC6000DualMonitor
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
-            layout.Controls.Add(new Label { Dock = DockStyle.Fill, Text = session.Description + "\r\n기준 제품을 놓고 [기준 측정값 읽기]를 누른 뒤 검사 트리거를 1회 보내세요.\r\n실제로 측정한 치수 4개를 mm로 입력하세요. 원은 지름을 입력합니다.\r\n적용 중에는 생산 트리거를 멈추세요. 현재 카메라 레시피에 저장합니다." }, 0, 0);
-            var table = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 5, RowCount = 5, CellBorderStyle = TableLayoutPanelCellBorderStyle.Single };
+            layout.Controls.Add(new Label { Dock = DockStyle.Fill, Text = session.Description + "\r\n기준 제품을 놓고 [기준 측정값 읽기]를 누른 뒤 검사 트리거를 1회 보내세요.\r\n표시된 각 항목의 실제 치수를 mm로 입력하세요. 원은 지름을 입력합니다.\r\n적용 중에는 생산 트리거를 멈추세요. 현재 카메라 레시피에 저장합니다." }, 0, 0);
+            var table = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 5, RowCount = count + 1, AutoScroll = true, CellBorderStyle = TableLayoutPanelCellBorderStyle.Single };
             foreach (float width in new float[] { 16, 20, 20, 22, 22 }) table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, width));
-            for (int i = 0; i < 5; i++) table.RowStyles.Add(new RowStyle(SizeType.Percent, 20));
-            string[] headings = { "항목", "픽셀 측정값", "실제 치수 (mm)", "현재 계수", "새 계수 (자동)" };
+            for (int i = 0; i <= count; i++) table.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
+            string[] headings = { "현재 레시피 항목", "픽셀 측정값", "실제 치수 (mm)", "현재 계수", "새 계수 (자동)" };
             for (int i = 0; i < 5; i++) table.Controls.Add(Cell(headings[i]), i, 0);
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < _actual.Length; i++)
             {
-                table.Controls.Add(Cell(CalibrationModel.Captions[i]), 0, i + 1);
+                table.Controls.Add(Cell(session.Baseline.Names[i] + (session.RadiusInputs[i] ? " (지름)" : "")), 0, i + 1);
                 _pixels[i] = Cell("읽기 전"); table.Controls.Add(_pixels[i], 1, i + 1);
                 _actual[i] = new NumericUpDown { DecimalPlaces = 6, Minimum = 0, Maximum = 1000000, Increment = 0.01m, Dock = DockStyle.Fill, ThousandsSeparator = true };
                 _actual[i].ValueChanged += delegate { Recalculate(); };
@@ -51,7 +53,7 @@ namespace SC6000DualMonitor
             var close = new Button { Text = "닫기", AutoSize = true, DialogResult = DialogResult.Cancel };
             buttons.Controls.Add(close); buttons.Controls.Add(_apply); buttons.Controls.Add(_read);
             layout.Controls.Add(buttons, 0, 3); Controls.Add(layout); CancelButton = close;
-            _status.Text = "현재 계수는 그대로 유지됩니다. 새 계수는 [적용 및 카메라 저장]을 눌러야 반영됩니다.";
+            _status.Text = "보정 대상 " + count + "개 / 그 외 계산 항목 " + session.Baseline.PreservedCount + "개 보존. 현재 계수는 그대로 유지됩니다. 새 계수는 [적용 및 카메라 저장]을 눌러야 반영됩니다.";
             _read.Click += delegate { BeginRead(); };
             _apply.Click += delegate { Apply(); };
             _timer.Tick += delegate { Poll(); }; _timer.Start();
@@ -65,7 +67,7 @@ namespace SC6000DualMonitor
             try
             {
                 _session.Arm(); _waiting = true; _deadline = DateTime.UtcNow.AddSeconds(30);
-                _status.Text = "기준 제품의 검사 트리거를 보내세요. 네 측정값이 있는 같은 회차를 기다립니다 (30초).";
+                _status.Text = "기준 제품의 검사 트리거를 보내세요. 측정값이 있는 같은 회차를 기다립니다 (30초).";
             }
             catch (Exception ex) { _waiting = false; _status.Text = ex.Message; }
         }
@@ -76,8 +78,8 @@ namespace SC6000DualMonitor
             if (frame != null)
             {
                 _waiting = false; _frame = frame;
-                for (int i = 0; i < 4; i++) _pixels[i].Text = frame.Pixels[i].ToString("G9") + (i == 3 ? " (반지름)" : "");
-                _status.Text = "회차 " + frame.Frame + " / " + frame.Time.ToString("HH:mm:ss") + " 기준 측정값 고정. 실제 치수 4개를 입력하세요.";
+                for (int i = 0; i < _actual.Length; i++) _pixels[i].Text = frame.Pixels[i].ToString("G9") + (_session.RadiusInputs[i] ? " (반지름)" : "");
+                _status.Text = "회차 " + frame.Frame + " / " + frame.Time.ToString("HH:mm:ss") + " 기준 측정값 고정. 표시된 항목의 실제 치수를 입력하세요.";
                 Recalculate();
             }
             else if (DateTime.UtcNow > _deadline)
@@ -89,7 +91,7 @@ namespace SC6000DualMonitor
         private void Recalculate()
         {
             _requested = null; _apply.Enabled = false;
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < _actual.Length; i++)
                 _factors[i].Text = _frame != null && _actual[i].Value > 0 ? ((double)_actual[i].Value / _frame.Pixels[i]).ToString("G12") : "—";
             if (_frame == null || _actual.Any(a => a.Value <= 0)) return;
             try { _requested = _session.Baseline.Calculate(_frame.Pixels, _actual.Select(a => (double)a.Value).ToArray()); _apply.Enabled = true; }
@@ -102,7 +104,7 @@ namespace SC6000DualMonitor
             try
             {
                 CalibrationController.Apply(_session, _session.Baseline, _requested);
-                MessageBox.Show(this, "4개 보정계수를 현재 카메라 레시피에 저장했습니다. 이후 검사는 저장한 계수로 계산합니다.", "치수 보정 완료", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(this, _session.Baseline.Count + "개 보정계수를 현재 카메라 레시피에 저장했습니다. 이후 검사는 저장한 계수로 계산합니다.", "치수 보정 완료", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 DialogResult = DialogResult.OK; Close();
             }
             catch (Exception ex)
@@ -119,4 +121,22 @@ namespace SC6000DualMonitor
             base.Dispose(disposing);
         }
     }
+    internal static class CalibrationModulePicker
+    {
+        public static string Choose(IWin32Window owner, string[] names)
+        {
+            if (names.Length == 0) throw new InvalidOperationException("현재 검사 흐름에서 Variable Calculation 모듈을 찾지 못했습니다.");
+            if (names.Length == 1) return names[0];
+            using (var form = new Form { Text = "보정할 계산 모듈 선택", ClientSize = new Size(480, 120), StartPosition = FormStartPosition.CenterParent, FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false })
+            {
+                var choice = new ComboBox { Left = 16, Top = 20, Width = 448, DropDownStyle = ComboBoxStyle.DropDownList };
+                choice.Items.AddRange(names); choice.SelectedIndex = 0;
+                var ok = new Button { Text = "선택", Left = 290, Top = 70, DialogResult = DialogResult.OK };
+                var cancel = new Button { Text = "취소", Left = 380, Top = 70, DialogResult = DialogResult.Cancel };
+                form.Controls.AddRange(new Control[] { choice, ok, cancel }); form.AcceptButton = ok; form.CancelButton = cancel;
+                return form.ShowDialog(owner) == DialogResult.OK ? (string)choice.SelectedItem : null;
+            }
+        }
+    }
+
 }

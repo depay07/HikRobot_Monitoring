@@ -16,12 +16,13 @@ class CalibrationTests
     {
         string[] factors={"0.02079658287","0.02109399915","0.02041996395","0.0421407222"};
         return Enumerable.Range(0,4).Select(i=>new JavaScriptSerializer().Serialize(new Dictionary<string,object> {
-            {"Name",CalibrationModel.Names[i]}, {"Expression","<float:<base64 "+Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("CalculatorInput"+i))+" />>[0]*"+factors[i]},
+            {"Name",new[]{"top_size","middle_size","bottom_size","circle_size"}[i]}, {"Expression","<float:<base64 "+Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("CalculatorInput"+i))+" />>[0]*"+factors[i]},
             {"Initial",0}, {"Summation",true}, {"Index",i}, {"Type","float"}, {"RemarkInfo","preserve annotation"} })).ToArray();
     }
     class Fake : ICalibrationEditorSession
     {
         public CalibrationModel Current; public CalibrationModel Baseline {get;set;}
+        public bool[] RadiusInputs { get { return Baseline.Names.Select(n => n == "circle_size" || n == "HOLE_DIA").ToArray(); } }
         public string Description {get{return "192.168.10.51 | Proc1 / Variable Calculation1";}}
         public List<string> Events=new List<string>();public bool FailWrite, FailSave, FailRollback, CorruptRead, Armed;
         public int Writes;public CalibrationFrame Next;
@@ -49,7 +50,34 @@ class CalibrationTests
         Reject(()=>baseline.Calculate(new[]{double.NaN,1,1,1},actual),"NaN rejected");
         Reject(()=>baseline.Calculate(pixels,new[]{-1d,1,1,1}),"negative physical size rejected");
         Reject(()=>baseline.Calculate(pixels,new[]{double.PositiveInfinity,1,1,1}),"infinity rejected");
-        var bad=Fixture();bad[0]=bad[0].Replace("*0.02079658287","+0.02079658287");Reject(()=>new CalibrationModel(bad),"unsupported formula not overwritten");
+        var bad=Fixture();bad[0]=bad[0].Replace("*0.02079658287","+0.02079658287");Reject(()=>new CalibrationModel(bad,baseline.Names),"unsupported selected formula not overwritten");
+        var serializer = new JavaScriptSerializer();
+        var renamed = Fixture().Select(j => serializer.Deserialize<Dictionary<string,object>>(j)).ToList();
+        string[] realNames = { "CB", "웹 두께", "HEIGHT", "HOLE_DIA" };
+        for(int i=0;i<4;i++)renamed[i]["Name"]=realNames[i];
+        renamed.Add(new Dictionary<string,object>{{"Name","extra_count"},{"Expression","1+2"},{"Type","int"},{"Index",4},{"Initial",7},{"Summation",false},{"RemarkInfo","keep this"}});
+        renamed.Add(new Dictionary<string,object>{{"Name","brightness_gain"},{"Expression","<float:<base64 QnJpZ2h0bmVzcw== />>[0]*1.5"},{"Type","float"},{"Index",5},{"Initial",0},{"Summation",false}});
+        var all = new CalibrationModel(renamed.Select(serializer.Serialize).ToArray());
+        Check(all.Count==5 && all.PreservedCount==1,"extra integer preserved; arbitrary named scaled outputs discovered");
+        var selected = all.Select(realNames);
+        Check(selected.Names.SequenceEqual(realNames),"actual recipe names including Korean displayed in index order");
+        Check(selected.Count==4&&selected.PreservedCount==2,"non-distance scale and extra integer excluded from editing but retained");
+        var changed = selected.Calculate(pixels,actual);
+        Check(changed.JsonInOrder().Length==6,"all six entries sent back, not only edited four");
+        Check(changed.JsonInOrder()[4]==selected.JsonInOrder()[4] && changed.JsonInOrder()[5]==selected.JsonInOrder()[5],"extra expressions and metadata unchanged");
+        Check(changed.Names.SequenceEqual(realNames),"renamed outputs not replaced with historical names");
+        var reverse = new CalibrationModel(renamed.AsEnumerable().Reverse().Select(serializer.Serialize).ToArray(),realNames);
+        Check(reverse.Same(selected),"enumeration order does not change item matching");
+        var staleExtra=renamed.Select(x=>new Dictionary<string,object>(x)).ToArray();staleExtra[4]["Expression"]="99";
+        Check(!selected.Same(new CalibrationModel(staleExtra.Select(serializer.Serialize).ToArray(),realNames)),"unselected edit detected before overwrite");
+        var single=all.Select(new[]{"HOLE_DIA"}).Calculate(new[]{100d},new[]{6d});
+        Check(single.Count==1 && single.Factors[0]==.06&&single.JsonInOrder().Length==6,"no four-item restriction; circle position not hardcoded");
+        var renamedFake=new Fake{Current=selected,Baseline=selected};CalibrationController.Apply(renamedFake,selected,changed);
+        Check(renamedFake.Current.Same(changed),"renamed extra-item recipe applies and verifies");
+        var rollbackExtra=new Fake{Current=selected,Baseline=selected,FailSave=true};Reject(()=>CalibrationController.Apply(rollbackExtra,selected,changed),"renamed save fault raised");
+        Check(rollbackExtra.Current.Same(selected),"rollback restores entire extra-item model");
+        var dynamicCollector=new CalibrationFrameCollector(1);
+        Check(dynamicCollector.Add(42,0,123).Pixels.Length==1,"variable-size frame collection");
         var collector=new CalibrationFrameCollector();
         Check(collector.Add(10,0,700)==null,"partial waits");collector.Add(11,1,225);collector.Add(10,2,250);collector.Add(10,3,162.5);
         Check(collector.Add(11,0,700)==null,"different frame cannot complete frame 10");
@@ -63,7 +91,7 @@ class CalibrationTests
         var saveFail=new Fake{Current=baseline,Baseline=baseline,FailSave=true};Reject(()=>CalibrationController.Apply(saveFail,baseline,requested),"save failure raises");Check(saveFail.Current.Same(baseline)&&saveFail.Events.Count(e=>e=="save")==2,"restore saved recipe after save failure");
         var recoveryFail=new Fake{Current=baseline,Baseline=baseline,FailWrite=true,FailRollback=true};Reject(()=>CalibrationController.Apply(recoveryFail,baseline,requested),"failed rollback raises");Check(!recoveryFail.Events.Contains("resume"),"do not resume with unknown coefficients");
         var mismatch=new Fake{Current=baseline,Baseline=baseline,CorruptRead=true};Reject(()=>CalibrationController.Apply(mismatch,baseline,requested),"readback mismatch raises");Check(!mismatch.Events.Contains("save"),"do not save unverified coefficients");
-        var ui=new Fake{Current=baseline,Baseline=baseline};
+        var ui=new Fake{Current=selected,Baseline=selected};
         using(var form=new CalibrationForm(ui,"1번 카메라"))
         {
             form.StartPosition=FormStartPosition.Manual;form.Location=new Point(-20000,-20000);form.Show();Application.DoEvents();
@@ -72,6 +100,7 @@ class CalibrationTests
             Call(form,"BeginRead");Check(ui.Armed,"UI requests fresh trigger");ui.Next=frame;Call(form,"Poll");
             for(int i=0;i<4;i++)fields[i].Value=(decimal)actual[i];
             Check(apply.Enabled,"valid four sizes and snapshot enable apply");
+            Check(form.Controls[0].Controls.OfType<TableLayoutPanel>().Single().Controls.OfType<Label>().Any(l=>l.Text=="CB"),"UI uses camera item name");
             fields[0].Value=0;Check(!apply.Enabled,"invalid edit disables apply");fields[0].Value=14;
             Check(Field<Label[]>(form,"_factors")[3].Text=="0.04","circle preview matches radius formula");
             if(args.Length>0)using(var image=new Bitmap(form.Width,form.Height)){form.DrawToBitmap(image,new Rectangle(Point.Empty,image.Size));image.Save(args[0]);}
