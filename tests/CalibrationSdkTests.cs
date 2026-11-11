@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Reflection;
 using System.Runtime.Serialization;
@@ -41,7 +41,7 @@ class CalibrationSdkTests
             Send(c,sources[1],1,10,1,0,0,2);Check(Call(c,"TakeFrame")==null,"ambiguous values rejected");
             Send(c,sources[1],1,10);var result=Call(c,"TakeFrame");
             Check(result!=null && (uint)result.GetType().GetField("Frame").GetValue(result)==10,"valid same-frame snapshot");
-            var pixels=(double[])result.GetType().GetField("Pixels").GetValue(result);Check(pixels[3]==103,"raw radius preserved without doubling");
+            var pixels=(double[])result.GetType().GetField("Pixels").GetValue(result);Check(pixels[3]==206,"raw radius normalized to diameter before coefficient calculation");
             for(int i=0;i<4;i++)Send(c,sources[i],i,12);Check(Call(c,"TakeFrame")==null,"later triggers cannot replace frozen reference snapshot");
             Console.WriteLine("PASS: "+checks+" calibration installed-SDK callback checks (no camera calls)");return 0;
         }

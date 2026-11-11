@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -35,8 +35,8 @@ namespace SC6000DualMonitor
         }
         public string CameraProcedureDescription { get { return _cameraIp + " | " + _procedure.Name; } }
         public bool IsClosed { get { lock (_callbackGate) return _disposed; } }
-        public string[] CalibrationModules() { return RemoteCalibrationSession.Modules(_procedure).Select(m => m.Name).ToArray(); }
-        public RemoteCalibrationSession OpenCalibration(string moduleName = null) { return new RemoteCalibrationSession(this, _procedure, moduleName); }
+        public CalibrationCatalog CalibrationCatalog() { return new CalibrationCatalog(_cameraIp, _procedure); }
+        public RemoteCalibrationSession OpenCalibration(CalibrationCatalog catalog, CalibrationMapping mapping) { return new RemoteCalibrationSession(this, catalog, mapping); }
         public IList<BlobModuleChoice> GetBlobModules()
         {
             var result = new List<BlobModuleChoice>();

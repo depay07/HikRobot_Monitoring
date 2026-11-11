@@ -32,9 +32,7 @@ namespace SC6000DualMonitor
             {
                 try
                 {
-                    string moduleName = CalibrationModulePicker.Choose(this, session.CalibrationModules());
-                    if (moduleName == null) return;
-                    using (var target = session.OpenCalibration(moduleName)) using (var form = new CalibrationForm(target, settings.Title)) form.ShowDialog(this);
+                    CalibrationWorkflow.Show(this, session, settings.Title);
                 }
                 catch (Exception ex)
                 {

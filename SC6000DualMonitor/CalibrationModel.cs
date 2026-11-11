@@ -1,85 +1,46 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
-using System.Text.RegularExpressions;
-using System.Web.Script.Serialization;
 
 namespace SC6000DualMonitor
 {
+    // Only the four selected scalar global variables are editable. No Calculator expressions.
     internal sealed class CalibrationModel
     {
-        private readonly Dictionary<string, object>[] _items;
-        private readonly int[] _selected;
-        public readonly string[] Names, Inputs, Prefixes;
+        public readonly string[] Names, Variables;
         public readonly double[] Factors;
         public int Count { get { return Names.Length; } }
-        public int PreservedCount { get { return _items.Length - Count; } }
-        private static readonly Regex Formula = new Regex(@"^(?<prefix><float:<base64 (?<input>[A-Za-z0-9+/=]+) />>\[0\]\s*\*\s*)(?<factor>[0-9.eE+\-]+)$");
-        public CalibrationModel(string[] json, string[] selectedNames = null)
+        public CalibrationModel(string[] names, string[] variables, double[] factors)
         {
-            if (json == null || json.Length == 0) throw new InvalidOperationException("Calculator 계산 항목을 읽지 못했습니다.");
-            var serializer = new JavaScriptSerializer();
-            _items = json.Select(j => serializer.Deserialize<Dictionary<string, object>>(j)).OrderBy(x => Convert.ToInt32(x["Index"])).ToArray();
-            if (_items.Any(x => !x.ContainsKey("Name") || !x.ContainsKey("Expression") || !x.ContainsKey("Type")) ||
-                _items.Select(x => Convert.ToString(x["Name"])).Distinct(StringComparer.Ordinal).Count() != _items.Length ||
-                _items.Select(x => Convert.ToInt32(x["Index"])).Distinct().Count() != _items.Length)
-                throw new InvalidOperationException("Calculator 이름 또는 순서가 중복되어 있습니다.");
-            var selected = new List<int>();
-            for (int i = 0; i < _items.Length; i++)
-            {
-                string name = Convert.ToString(_items[i]["Name"]);
-                if (selectedNames != null && !selectedNames.Contains(name, StringComparer.Ordinal)) continue;
-                double factor;
-                var match = Formula.Match(Convert.ToString(_items[i]["Expression"]));
-                bool valid = Convert.ToString(_items[i]["Type"]) == "float" && match.Success &&
-                    double.TryParse(match.Groups["factor"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out factor) && Positive(factor);
-                if (valid) selected.Add(i);
-                else if (selectedNames != null) throw new InvalidOperationException(name + ": 보정 대상 계산식이 변경되었습니다. 다시 읽으세요.");
-            }
-            _selected = selected.ToArray();
-            Names = _selected.Select(i => Convert.ToString(_items[i]["Name"])).ToArray();
-            if (Names.Length == 0 || (selectedNames != null && !Names.OrderBy(n => n).SequenceEqual(selectedNames.OrderBy(n => n))))
-                throw new InvalidOperationException("보정 가능한 '픽셀값 × 양수 계수' 항목을 찾지 못했습니다.");
-            var matches = _selected.Select(i => Formula.Match(Convert.ToString(_items[i]["Expression"]))).ToArray();
-            Inputs = matches.Select(m => m.Groups["input"].Value).ToArray();
-            Prefixes = matches.Select(m => m.Groups["prefix"].Value).ToArray();
-            Factors = matches.Select(m => double.Parse(m.Groups["factor"].Value, CultureInfo.InvariantCulture)).ToArray();
+            if (names == null || variables == null || factors == null || names.Length != 4 || variables.Length != 4 || factors.Length != 4 ||
+                names.Any(string.IsNullOrWhiteSpace) || variables.Any(string.IsNullOrWhiteSpace) || variables.Distinct(StringComparer.Ordinal).Count() != 4)
+                throw new InvalidOperationException("서로 다른 보정계수 변수 4개와 표시 이름을 지정하세요.");
+            Names = (string[])names.Clone(); Variables = (string[])variables.Clone();
+            Factors = factors.Select(Canonical).ToArray();
         }
-        public CalibrationModel Select(string[] names) { return new CalibrationModel(JsonInOrder(), names); }
+        private static double Canonical(double value)
+        {
+            float stored = (float)value;
+            if (!Positive(stored)) throw new InvalidOperationException("보정계수는 카메라 float 범위의 양수여야 합니다.");
+            return stored;
+        }
         public static bool Positive(double value) { return value > 0 && !double.IsNaN(value) && !double.IsInfinity(value); }
         public CalibrationModel Calculate(double[] pixels, double[] actual)
         {
-            if (pixels == null || actual == null || pixels.Length != Count || actual.Length != Count) throw new InvalidOperationException("표시된 보정 항목의 측정값과 실제 치수를 입력하세요.");
-            var serializer = new JavaScriptSerializer();
-            var copies = _items.Select(x => new Dictionary<string, object>(x)).ToArray();
+            if (pixels == null || actual == null || pixels.Length != Count || actual.Length != Count)
+                throw new InvalidOperationException("네 항목의 측정값과 실제 치수를 입력하세요.");
+            var factors = new double[Count];
             for (int i = 0; i < Count; i++)
             {
-                if (!Positive(pixels[i]) || !Positive(actual[i])) throw new InvalidOperationException(Names[i] + ": 픽셀값과 실제 치수는 0보다 큰 유효한 값이어야 합니다.");
-                double factor = actual[i] / pixels[i];
-                if (!Positive(factor) || factor > float.MaxValue || factor < float.Epsilon) throw new InvalidOperationException("보정계수가 카메라의 계산 범위를 벗어납니다.");
-                copies[_selected[i]]["Expression"] = Prefixes[i] + factor.ToString("R", CultureInfo.InvariantCulture);
+                if (!Positive(pixels[i]) || !Positive(actual[i])) throw new InvalidOperationException(Names[i] + ": 픽셀값과 실제 치수는 양수여야 합니다.");
+                factors[i] = Canonical(actual[i] / pixels[i]);
             }
-            return new CalibrationModel(copies.Select(serializer.Serialize).ToArray(), Names);
+            return new CalibrationModel(Names, Variables, factors);
         }
-        public string[] JsonInOrder() { return _items.Select(new JavaScriptSerializer().Serialize).ToArray(); }
+        public bool SameTargets(CalibrationModel other)
+        { return other != null && Names.SequenceEqual(other.Names) && Variables.SequenceEqual(other.Variables); }
         public bool Same(CalibrationModel other)
-        {
-            if (other == null || _items.Length != other._items.Length || !Names.SequenceEqual(other.Names)) return false;
-            var serializer = new JavaScriptSerializer();
-            for (int i = 0; i < _items.Length; i++)
-            {
-                if (!_items[i].Keys.OrderBy(k => k).SequenceEqual(other._items[i].Keys.OrderBy(k => k))) return false;
-                foreach (string key in _items[i].Keys)
-                {
-                    object a = _items[i][key], b = other._items[i][key];
-                    if (a is ValueType && !(a is bool) && b is ValueType && !(b is bool))
-                    { if (Convert.ToDouble(a) != Convert.ToDouble(b)) return false; }
-                    else if (serializer.Serialize(a) != serializer.Serialize(b)) return false;
-                }
-            }
-            return true;
-        }
+        { return SameTargets(other) && Factors.SequenceEqual(other.Factors); }
     }
     internal interface ICalibrationSettingsSession
     {
@@ -102,13 +63,13 @@ namespace SC6000DualMonitor
     {
         public static void Apply(ICalibrationSettingsSession session, CalibrationModel baseline, CalibrationModel requested)
         {
-            if (baseline == null || requested == null) throw new InvalidOperationException("기준 측정값을 먼저 읽으세요.");
-            if (!baseline.Same(session.ReadModel())) throw new InvalidOperationException("Calculator 설정이 변경되었습니다. 기준 측정값을 다시 읽으세요.");
+            if (baseline == null || requested == null || !baseline.SameTargets(requested)) throw new InvalidOperationException("기준 측정값을 먼저 읽으세요.");
+            if (!baseline.Same(session.ReadModel())) throw new InvalidOperationException("보정계수가 변경되었습니다. 기준 측정값을 다시 읽으세요.");
             session.Pause();
             bool attempted = false, saveAttempted = false;
             try
             {
-                if (!baseline.Same(session.ReadModel())) throw new InvalidOperationException("편집 중 Calculator 설정이 변경되었습니다.");
+                if (!baseline.Same(session.ReadModel())) throw new InvalidOperationException("편집 중 보정계수가 변경되었습니다.");
                 attempted = true;
                 session.WriteModel(requested);
                 if (!requested.Same(session.ReadModel())) throw new InvalidOperationException("카메라 보정계수 쓰기 확인 실패");

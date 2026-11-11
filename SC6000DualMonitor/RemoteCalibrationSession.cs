@@ -1,19 +1,18 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using CalculatorModuleCs;
+using GlobalVariableModuleCs;
 using VM.Core;
 using VM.PlatformSDKCS;
-using VMControls.BaseInterface;
 
 namespace SC6000DualMonitor
 {
     internal sealed class RemoteCalibrationSession : ICalibrationEditorSession
     {
         private readonly RemoteInspectionSession _owner;
-        private readonly CalculatorModuleTool _calculator;
-        private readonly VmProcedure _procedure;
-        private readonly ImvsSdkDefine.IMVS_SUBSCRIBE_INFO[] _links;
+        private readonly CalibrationCatalog _catalog;
+        private readonly CalibrationMapping _mapping;
+        private readonly GlobalVariableModuleTool _global;
         private readonly VmModule[] _sources;
         private readonly string[] _fields;
         private readonly object _gate = new object();
@@ -24,44 +23,19 @@ namespace SC6000DualMonitor
         private readonly string _binding;
         private readonly RemoteSolutionSession _solution = new RemoteSolutionSession(null, null);
         private readonly string _recipePath;
-        public string Description { get { return _owner.CameraProcedureDescription + " / " + _calculator.Name; } }
+        public string Description { get { return _owner.CameraProcedureDescription + " / " + System.IO.Path.GetFileName(_recipePath) + " / " + _global.Name; } }
         public CalibrationModel Baseline { get; private set; }
         public bool[] RadiusInputs { get { return _fields.Select(f => f == "CircleRadius").ToArray(); } }
-        public static List<CalculatorModuleTool> Modules(VmProcedure procedure)
+        public RemoteCalibrationSession(RemoteInspectionSession owner, CalibrationCatalog catalog, CalibrationMapping mapping)
         {
-            var list = procedure.GetAllModuleList();
-            var result = new List<CalculatorModuleTool>();
-            for (int i = 0; list.astModuleInfo != null && i < list.nNum && i < list.astModuleInfo.Length; i++)
-            {
-                var module = procedure.GetModuleByID(list.astModuleInfo[i].nModuleID) as CalculatorModuleTool;
-                if (module != null) result.Add(module);
-            }
-            return result;
-        }
-        public RemoteCalibrationSession(RemoteInspectionSession owner, VmProcedure procedure, string moduleName = null)
-        {
-            _owner = owner; _procedure = procedure;
-            _recipePath = _solution.CurrentPath;
-            if (string.IsNullOrWhiteSpace(_recipePath)) throw new InvalidOperationException("현재 카메라 레시피 경로를 확인할 수 없습니다. 보정값은 변경하지 않았습니다.");
-            var modules = Modules(procedure);
-            if (moduleName != null) modules = modules.Where(m => m.Name == moduleName).ToList();
-            if (modules.Count != 1) throw new InvalidOperationException("보정할 Variable Calculation 모듈을 선택하세요. 조회된 모듈: " + string.Join(", ", modules.Select(m => m.Name)));
-            _calculator = modules[0];
-            _binding = BindingSignature();
-            _links = CalibrationDeviceData.Subscriptions(_calculator);
-            var all = ReadModel();
-            var supported = Enumerable.Range(0, all.Count).Where(i => Source(all.Inputs[i]) != null).Select(i => all.Names[i]).ToArray();
-            if (supported.Length == 0) throw new InvalidOperationException("Calculator에서 선 간 거리 또는 원 반지름에 연결된 보정 항목을 찾지 못했습니다. 조회된 항목: " + string.Join(", ", all.Names));
-            Baseline = all.Select(supported);
-            _sources = new VmModule[Baseline.Count]; _fields = new string[Baseline.Count];
-            _frames = new CalibrationFrameCollector(Baseline.Count);
-            for (int i = 0; i < Baseline.Count; i++)
-            {
-                var source = Source(Baseline.Inputs[i]);
-                _sources[i] = _procedure.GetModuleByID(source.Value.nPubModuleID);
-                if (_sources[i] == null) throw new InvalidOperationException("측정 모듈을 찾지 못했습니다: " + source.Value.nPubModuleID);
-                _fields[i] = CalibrationDeviceData.Text(source.Value.strPubOutput);
-            }
+            _owner = owner; _catalog = catalog; _mapping = mapping;
+            _recipePath = catalog.Recipe;
+            _global = catalog.Resolve(mapping);
+            _binding = catalog.BindingSignature();
+            _sources = mapping.Rows.Select(r => catalog.Sources.Single(s => s.Module.ID == r.SourceId && s.Field == r.Field).Module).ToArray();
+            _fields = mapping.Rows.Select(r => r.Field).ToArray();
+            _frames = new CalibrationFrameCollector(4);
+            Baseline = ReadModel();
             try
             {
                 foreach (var module in _sources.Distinct())
@@ -73,46 +47,33 @@ namespace SC6000DualMonitor
             }
             catch { Dispose(); throw; }
         }
-        private string BindingSignature()
-        {
-            return CalibrationDeviceData.BindingSignature(_calculator);
-        }
         private void VerifyRecipe()
         {
-            if (_owner.IsClosed || !string.Equals(_recipePath, _solution.CurrentPath, StringComparison.Ordinal))
+            if (_disposed || _owner.IsClosed || !string.Equals(_recipePath, _solution.CurrentPath, StringComparison.Ordinal))
                 throw new InvalidOperationException("카메라 연결 또는 레시피가 변경되었습니다. 보정 창을 다시 여세요.");
-        }
-        private ImvsSdkDefine.IMVS_SUBSCRIBE_INFO? Source(string inputName)
-        {
-            return CalibrationDeviceData.MeasurementSource(_calculator.ID, inputName, _links);
+            if (_catalog.BindingSignature() != _binding) throw new InvalidOperationException("측정값/전역 변수 연결이 변경되었습니다. 보정 창을 다시 여세요.");
+            _catalog.Resolve(_mapping);
         }
         public CalibrationModel ReadModel()
         {
             VerifyRecipe();
-            if (_binding != null && BindingSignature() != _binding) throw new InvalidOperationException("Calculator의 측정값 연결이 변경되었습니다. 보정 창을 다시 여세요.");
-            var model = CalibrationDeviceData.ReadItems(() => CalibrationDeviceData.Outputs(_calculator), name =>
+            var values = new double[4];
+            for (int i = 0; i < 4; i++)
             {
-                try { return ((IUserStringData)_calculator.Params)[name]; }
-                catch (Exception ex)
-                {
-                    var sdk = ex as VmException;
-                    string detail = sdk == null ? ex.Message : "SDK 0x" + unchecked((uint)sdk.errorCode).ToString("X8") + " / " + ex.Message;
-                    throw new InvalidOperationException("Calculator 항목 읽기 실패: " + name +
-                        "\r\n대상: " + Description + " (ID " + _calculator.ID + ")" +
-                        "\r\n레시피: " + _recipePath + "\r\n원인: " + detail +
-                        "\r\n전체 항목을 읽지 못해 보정값을 변경하지 않았습니다.", ex);
-                }
-            }, Baseline == null ? null : Baseline.Names);
+                string name = _mapping.Rows[i].Variable;
+                var value = _global.GetVarFloat(name);
+                if (value.nValueNum != 1 || value.pFloatVal == null || value.pFloatVal.Length != 1 || !CalibrationModel.Positive(value.pFloatVal[0]))
+                    throw new InvalidOperationException(name + ": 보정계수는 양수 float 단일 값이어야 합니다. VisionMaster에서 기존 계산계수를 초기값으로 넣으세요.");
+                values[i] = value.pFloatVal[0];
+            }
             VerifyRecipe();
-            if (_binding != null && BindingSignature() != _binding) throw new InvalidOperationException("조회 중 측정값 연결이 변경되었습니다. 보정 창을 다시 여세요.");
-            return model;
+            return new CalibrationModel(_mapping.Rows.Select(r => r.Label).ToArray(), _mapping.Rows.Select(r => r.Variable).ToArray(), values);
         }
-
         public void Arm()
         {
             lock (_gate) { _armed = false; _ready = null; _frames.Clear(); }
             var current = ReadModel();
-            if (!Baseline.Same(current)) throw new InvalidOperationException("Calculator 설정이 변경되었습니다. 보정 창을 닫고 다시 여세요.");
+            if (!Baseline.Same(current)) throw new InvalidOperationException("보정계수가 변경되었습니다. 보정 창을 닫고 다시 여세요.");
             lock (_gate) { if (_disposed) throw new ObjectDisposedException("Calibration"); _armed = true; }
         }
         public CalibrationFrame TakeFrame()
@@ -134,7 +95,7 @@ namespace SC6000DualMonitor
                     if (!ReferenceEquals(sender, _sources[i])) continue;
                     var results = data.pInfo.Where(f => f.strParamName == _fields[i]).ToArray();
                     if (results.Length != 1 || results[0].nValueStatus != 1 || results[0].nValueNum != 1 || results[0].pFloatValue == null || results[0].pFloatValue.Length != 1) continue;
-                    var complete = _frames.Add(data.nExecuteCount, i, results[0].pFloatValue[0]);
+                    var complete = _frames.Add(data.nExecuteCount, i, (double)results[0].pFloatValue[0] * (_fields[i] == "CircleRadius" ? 2.0 : 1.0));
                     if (complete != null) { _ready = complete; _armed = false; break; }
                 }
             }
@@ -142,17 +103,30 @@ namespace SC6000DualMonitor
         public void WriteModel(CalibrationModel model)
         {
             VerifyRecipe();
-            if (BindingSignature() != _binding) throw new InvalidOperationException("측정 연결이 변경되어 보정을 중단합니다.");
-            // Match the installed Calculator UI protocol, preserving ALL names/types/indices and inputs, including non-calibration items.
-            var parameters = (IUserBytesData)_calculator.Params;
-            parameters["command#start"] = new byte[1];
-            foreach (string json in model.JsonInOrder()) parameters["command#data"] = System.Text.Encoding.UTF8.GetBytes(json);
-            ((IUserStringData)_calculator.Params)["command#io"] = "";
-            if (BindingSignature() != _binding) throw new InvalidOperationException("적용 후 측정 연결 확인 실패");
+            if (!Baseline.SameTargets(model)) throw new InvalidOperationException("보정 대상 변수가 변경되었습니다.");
+            for (int i = 0; i < model.Count; i++)
+            {
+                VerifyRecipe();
+                _global.SetGlobalVar(model.Variables[i], ((float)model.Factors[i]).ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+            }
         }
         public void Pause() { CancelRead(); VerifyRecipe(); _owner.Pause(); }
-        public void Save() { _owner.Save(); }
-        public void Resume() { _owner.Resume(); }
+        private void VerifyStoredValues()
+        {
+            var current = ReadModel();
+            // GetAllGlobalVar reads the SDK's serializable ValueList, not just runtime outputs.
+            var stored = _global.GetAllGlobalVar();
+            for (int i = 0; i < current.Count; i++)
+            {
+                var matches = stored.Where(v => v.strValueName == current.Variables[i]).ToArray();
+                float value;
+                if (matches.Length != 1 || !float.TryParse(matches[0].strValue, System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out value) || value != (float)current.Factors[i])
+                    throw new InvalidOperationException(current.Variables[i] + ": 저장 대상 전역 변수 값과 실행 값이 일치하지 않습니다. 레시피 저장을 완료하지 않았습니다.");
+            }
+        }
+        public void Save() { VerifyRecipe(); VerifyStoredValues(); _owner.Save(); VerifyRecipe(); VerifyStoredValues(); }
+        public void Resume() { VerifyRecipe(); _owner.Resume(); }
         public void Dispose()
         {
             lock (_gate) { _disposed = true; _armed = false; if (_frames != null) _frames.Clear(); }

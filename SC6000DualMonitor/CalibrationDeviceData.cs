@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -15,16 +15,6 @@ namespace SC6000DualMonitor
         public string Name, Type, Extra;
         public int DataType;
         public string Signature { get { return new JavaScriptSerializer().Serialize(new object[] { Name, Type, Extra, DataType }); } }
-        public bool IsItem
-        {
-            get
-            {
-                if (!Name.StartsWith("%", StringComparison.Ordinal) || !Name.EndsWith("%", StringComparison.Ordinal)) return false;
-                if (Name.Length < 3) throw new InvalidOperationException("카메라 계산 항목 이름이 비어 있습니다.");
-                return !Regex.IsMatch(Extra, @"(?:^|[;\s])IsResultShow\s*=\s*true(?:$|[;\s])", RegexOptions.IgnoreCase);
-            }
-        }
-        public string ItemName { get { return Name.Substring(1, Name.Length - 2); } }
     }
 
     // Query the device on EVERY read. VmModule.Outputs is an additive, lazy cache:
@@ -64,24 +54,12 @@ namespace SC6000DualMonitor
         {
             return new JavaScriptSerializer().Serialize(items.Select(x => x.Signature).OrderBy(x => x, StringComparer.Ordinal).ToArray());
         }
-        internal static CalibrationModel ReadItems(Func<CalibrationOutput[]> inventory, Func<string, string> read, string[] selection)
+        internal static bool ScalarLink(ImvsSdkDefine.IMVS_SUBSCRIBE_INFO link, uint consumer, uint publisher, string output)
         {
-            var before = inventory();
-            var items = before.Where(x => x.IsItem).ToArray();
-            if (items.Length == 0) throw new InvalidOperationException("카메라가 반환한 Calculator 계산 항목이 없습니다.");
-            var json = new List<string>();
-            foreach (var item in items)
-            {
-                string data = read(item.ItemName);
-                var payload = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(data);
-                if (payload == null || !payload.ContainsKey("Name") || !payload.ContainsKey("Type") ||
-                    Convert.ToString(payload["Name"]) != item.ItemName || Convert.ToString(payload["Type"]) != item.Type)
-                    throw new InvalidOperationException("카메라 목록과 계산식의 이름/유형이 다릅니다: " + item.ItemName);
-                json.Add(data);
-            }
-            if (InventorySignature(before) != InventorySignature(inventory()))
-                throw new InvalidOperationException("조회 중 Calculator 항목이 변경되었습니다. 보정 창을 다시 여세요.");
-            return new CalibrationModel(json.ToArray(), selection);
+            if (link.nSubModuleID != consumer || link.nPubModuleID != publisher || link.nIsPubConstant != 0 ||
+                link.nIsIndexConstant != 1 || link.nIndexModuleID != 0) return false;
+            string index = Text(link.strIndex);
+            return (index == "All" || index == "0") && Text(link.strPubOutput).Trim('%') == output;
         }
         public static ImvsSdkDefine.IMVS_SUBSCRIBE_INFO[] Subscriptions(VmModule module)
         {
@@ -92,16 +70,6 @@ namespace SC6000DualMonitor
             var result = list.pstSubscribeInfo();
             if (result == null || result.Length != list.nNum) throw new InvalidOperationException("카메라 계산 입력 연결이 불완전합니다.");
             return result;
-        }
-        internal static ImvsSdkDefine.IMVS_SUBSCRIBE_INFO? MeasurementSource(uint moduleId, string inputName, ImvsSdkDefine.IMVS_SUBSCRIBE_INFO[] links)
-        {
-            var matches = links.Where(x => x.nSubModuleID == moduleId && Text(x.strSubInput).Trim('%') == inputName).ToArray();
-            if (matches.Length != 1 || matches[0].nIsPubConstant != 0) return null;
-            var source = matches[0];
-            string index = Text(source.strIndex), output = Text(source.strPubOutput);
-            // Callback capture below is scalar; a variable or nonzero array index is not equivalent.
-            if (source.nIsIndexConstant != 1 || source.nIndexModuleID != 0 || (index != "All" && index != "0")) return null;
-            return output == "L2LAbsDist" || output == "CircleRadius" ? source : (ImvsSdkDefine.IMVS_SUBSCRIBE_INFO?)null;
         }
         public static string BindingSignature(VmModule module)
         {
