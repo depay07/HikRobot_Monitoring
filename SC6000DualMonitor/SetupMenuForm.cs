@@ -12,12 +12,13 @@ namespace SC6000DualMonitor
         {
             Text = settings.Title + " | Set Up";
             StartPosition = FormStartPosition.CenterParent;
-            ClientSize = new Size(440, 360);
+            ClientSize = new Size(440, 420);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false; MinimizeBox = false; ShowInTaskbar = false;
             Font = new Font("Segoe UI", 10);
-            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(16), ColumnCount = 1, RowCount = 6 };
+            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(16), ColumnCount = 1, RowCount = 7 };
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
@@ -27,9 +28,15 @@ namespace SC6000DualMonitor
             var conditions = new Button { Text = "OK/NG 설정 조건", Dock = DockStyle.Fill };
             var blob = new Button { Text = "BLOB 조건 설정", Dock = DockStyle.Fill };
             var close = new Button { Text = "닫기", Dock = DockStyle.Right, DialogResult = DialogResult.Cancel };
-            layout.Controls.Add(conditions, 0, 1); layout.Controls.Add(blob, 0, 2); layout.Controls.Add(close, 0, 5);
+            layout.Controls.Add(conditions, 0, 1); layout.Controls.Add(blob, 0, 2); layout.Controls.Add(close, 0, 6);
+            var exposure = new Button { Text = "노출 / 게인 설정 (Exposure / Gain)", Dock = DockStyle.Fill };
+            layout.Controls.Add(exposure, 0, 4);
+            exposure.Click += delegate {
+                using (var form = new ExposureSetupForm(settings.Title, session.GetExposureSessions,
+                    message => CameraLog.Write(settings.Ip, "ExposureGain", message))) form.ShowDialog(this);
+            };
             var files = new Button { Text = "카메라 레시피 파일 관리", Dock = DockStyle.Fill };
-            layout.Controls.Add(files, 0, 4);
+            layout.Controls.Add(files, 0, 5);
             files.Click += delegate
             {
                 try

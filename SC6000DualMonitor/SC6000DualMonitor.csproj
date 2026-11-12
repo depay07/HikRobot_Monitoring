@@ -42,6 +42,8 @@
     <Reference Include="System.Web.Extensions" />
     <Reference Include="GlobalVariableModuleCs"><Private>False</Private></Reference>
     <Reference Include="CalculatorModuleCs"><Private>False</Private></Reference>
+    <Reference Include="GlobalSmartCameraModuleCs"><Private>False</Private></Reference>
+    <Reference Include="ImageSourceModuleCs"><Private>False</Private></Reference>
     <Reference Include="System.Drawing" />
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Xml" />
@@ -93,6 +95,9 @@
     <Compile Include="BlobSettings.cs" />
     <Compile Include="RemoteBlobSession.cs" />
     <Compile Include="BlobSetupForm.cs" />
+    <Compile Include="ExposureSettings.cs" />
+    <Compile Include="RemoteExposureSession.cs" />
+    <Compile Include="ExposureSetupForm.cs" />
     <Compile Include="SetupMenuForm.cs" />
     <Compile Include="CalibrationModel.cs" />
     <Compile Include="CalibrationMapping.cs" />
