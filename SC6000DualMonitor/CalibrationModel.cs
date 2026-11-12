@@ -79,16 +79,24 @@ namespace SC6000DualMonitor
             }
             catch (Exception failure)
             {
+                bool runtimeRestored = false;
                 try
                 {
                     if (attempted)
                     {
                         session.WriteModel(baseline);
                         if (!baseline.Same(session.ReadModel())) throw new InvalidOperationException("기존 보정계수 복원 확인 실패");
+                        runtimeRestored = true;
                         if (saveAttempted) session.Save();
                     }
                 }
-                catch (Exception recovery) { throw new InvalidOperationException("보정 적용 및 복원 실패. 검사 흐름을 정지 상태로 유지합니다.\r\n적용: " + failure.Message + "\r\n복원: " + recovery.Message, failure); }
+                catch (Exception recovery)
+                {
+                    string state = runtimeRestored
+                        ? "이전 실행 보정계수는 복원했으나 레시피 저장 확인에 실패했습니다."
+                        : "보정 적용 및 실행 계수 복원 확인에 실패했습니다.";
+                    throw new InvalidOperationException(state + " 검사 흐름을 정지 상태로 유지합니다.\r\n적용: " + failure.Message + "\r\n복원: " + recovery.Message, failure);
+                }
                 try { session.Resume(); }
                 catch (Exception ex) { throw new InvalidOperationException("기존 계수는 유지/복원했으나 검사 재개 실패: " + ex.Message, failure); }
                 throw new InvalidOperationException("보정 적용 실패. 기존 계수를 유지하거나 복원했습니다.\r\n" + failure.Message, failure);

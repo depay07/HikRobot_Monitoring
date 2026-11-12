@@ -107,25 +107,46 @@ namespace SC6000DualMonitor
             for (int i = 0; i < model.Count; i++)
             {
                 VerifyRecipe();
-                _global.SetGlobalVar(model.Variables[i], ((float)model.Factors[i]).ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+                float value = (float)model.Factors[i];
+                CameraLog.Write(_catalog.Camera, "CalibrationWrite", model.Variables[i] + "=" +
+                    value.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+                _global.SetVarFloat(model.Variables[i], new[] { value });
             }
         }
         public void Pause() { CancelRead(); VerifyRecipe(); _owner.Pause(); }
-        private void VerifyStoredValues()
+        private void LogVariableList(string stage)
         {
-            var current = ReadModel();
-            // GetAllGlobalVar reads the SDK's serializable ValueList, not just runtime outputs.
-            var stored = _global.GetAllGlobalVar();
-            for (int i = 0; i < current.Count; i++)
+            // ValueList is variable-list XML, NOT a read of the saved .solx file.
+            // Its text representation is diagnostic only. Verify actual values with GetVarFloat.
+            try
             {
-                var matches = stored.Where(v => v.strValueName == current.Variables[i]).ToArray();
-                float value;
-                if (matches.Length != 1 || !float.TryParse(matches[0].strValue, System.Globalization.NumberStyles.Float,
-                    System.Globalization.CultureInfo.InvariantCulture, out value) || value != (float)current.Factors[i])
-                    throw new InvalidOperationException(current.Variables[i] + ": 저장 대상 전역 변수 값과 실행 값이 일치하지 않습니다. 레시피 저장을 완료하지 않았습니다.");
+                var list = _global.GetAllGlobalVar();
+                foreach (var row in _mapping.Rows)
+                    CameraLog.Write(_catalog.Camera, "CalibrationList", stage + " " + row.Variable + " list=[" +
+                        string.Join(" | ", list.Where(v => v.strValueName == row.Variable).Select(v => v.strValueType + ":" + v.strValue)) + "]");
+            }
+            catch (Exception ex) { CameraLog.Write(_catalog.Camera, "CalibrationListUnavailable", stage + " " + ex.Message); }
+        }
+        public void Save()
+        {
+            var before = ReadModel(); // Also checks camera, recipe and bindings before saving.
+            LogVariableList("before-save");
+            try
+            {
+                CameraLog.Write(_catalog.Camera, "CalibrationSaveBegin", _recipePath + " " + string.Join("; ",
+                    before.Variables.Select((name, i) => name + "=" + ((float)before.Factors[i]).ToString("R", System.Globalization.CultureInfo.InvariantCulture))));
+                _owner.Save(); // Existing checked SaveAs to the current CAMERA path, never a local dialog.
+                if (!before.Same(ReadModel()))
+                    throw new InvalidOperationException("레시피 저장 후 카메라의 실행 보정계수가 변경되었습니다.");
+                CameraLog.Write(_catalog.Camera, "CalibrationSaveComplete", _recipePath);
+                LogVariableList("after-save");
+            }
+            catch (Exception ex)
+            {
+                CameraLog.Write(_catalog.Camera, "CalibrationSaveFailed", ex.ToString());
+                throw new InvalidOperationException(ex.Message + "\r\n진단 로그: " + CameraLog.PathFor(_catalog.Camera), ex);
             }
         }
-        public void Save() { VerifyRecipe(); VerifyStoredValues(); _owner.Save(); VerifyRecipe(); VerifyStoredValues(); }
         public void Resume() { VerifyRecipe(); _owner.Resume(); }
         public void Dispose()
         {

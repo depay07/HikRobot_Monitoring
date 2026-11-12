@@ -17,16 +17,16 @@ class CalibrationTests
         public CalibrationModel Baseline{get;set;}
         public Dictionary<string,double> Values=new Dictionary<string,double>();
         public List<string> Events=new List<string>();
-        public bool FailWrite,FailSave,FailRollback,IgnoreWrite,ChangedRecipe,ChangeAfterPause,Paused,Armed;
+        public bool FailWrite,FailSave,FailEverySave,ChangeDuringSave,FailRollback,IgnoreWrite,ChangedRecipe,ChangeAfterPause,Paused,Armed;
         public int Writes; public CalibrationFrame Next;
         public string Description{get{return "192.168.10.51 | Proc1 / recipe.solx";}}
         public bool[] RadiusInputs{get{return new[]{false,false,false,true};}}
-        public Fake(){Baseline=Model();for(int i=0;i<4;i++)Values[Baseline.Variables[i]]=Baseline.Factors[i];Values["unrelated_counter"]=99;}
+        public Fake(CalibrationModel baseline=null){Baseline=baseline??Model();for(int i=0;i<4;i++)Values[Baseline.Variables[i]]=Baseline.Factors[i];Values["unrelated_counter"]=99;}
         public CalibrationModel ReadModel(){if(ChangedRecipe)throw new InvalidOperationException("recipe changed");Events.Add("read");return new CalibrationModel(Baseline.Names,Baseline.Variables,Baseline.Variables.Select(v=>Values[v]).ToArray());}
         public void WriteModel(CalibrationModel model){if(ChangedRecipe)throw new InvalidOperationException("recipe changed");Events.Add("write");Writes++;if(FailRollback&&Writes>1)throw new Exception("restore failed");for(int i=0;i<4;i++){if(!IgnoreWrite||Writes>1)Values[model.Variables[i]]=model.Factors[i];if(FailWrite&&Writes==1&&i==1)throw new Exception("partial write");}}
         public void Pause(){Paused=true;Events.Add("pause");if(ChangeAfterPause)ChangedRecipe=true;}
         public void Resume(){Paused=false;Events.Add("resume");}
-        public void Save(){Events.Add("save");if(FailSave){FailSave=false;throw new Exception("save failed");}}
+        public void Save(){Events.Add("save");if(ChangeDuringSave){ChangeDuringSave=false;Values[Baseline.Variables[0]]=.123;}if(FailSave||FailEverySave){FailSave=false;throw new Exception("save failed");}}
         public void Arm(){Armed=true;} public void CancelRead(){Armed=false;}
         public CalibrationFrame TakeFrame(){var frame=Next;Next=null;return frame;}public void Dispose(){}
     }
@@ -58,12 +58,29 @@ class CalibrationTests
             var f=new Fake();CalibrationController.Apply(f,baseline,wanted);Check(f.ReadModel().Same(wanted),"all four coefficients applied");Check(f.Values["unrelated_counter"]==99,"unrelated global untouched");Check(!f.Paused && f.Events.Count(e=>e=="save")==1,"save then resume");
             f=new Fake{FailWrite=true};Reject(()=>CalibrationController.Apply(f,baseline,wanted),"partial write fault");Check(f.ReadModel().Same(baseline)&&!f.Paused,"partial write fully restored");Check(!f.Events.Contains("save"),"partial write never saved");
             f=new Fake{FailSave=true};Reject(()=>CalibrationController.Apply(f,baseline,wanted),"save fault");Check(f.ReadModel().Same(baseline)&&f.Events.Count(e=>e=="save")==2,"restore and resave original after save failure");
+            f=new Fake{FailEverySave=true};
+            string restoreMessage="";try{CalibrationController.Apply(f,baseline,wanted);}catch(InvalidOperationException ex){restoreMessage=ex.Message;}
+            Check(f.Paused&&f.ReadModel().Same(baseline),"runtime restore succeeds but repeated save failure stays paused");
+            Check(restoreMessage.Contains("이전 실행 보정계수는 복원했으나 레시피 저장 확인에 실패"),"report runtime restoration separately from persistence failure");
+            f=new Fake{ChangeDuringSave=true};Reject(()=>CalibrationController.Apply(f,baseline,wanted),"save changes runtime coefficient");
+            Check(f.ReadModel().Same(baseline)&&f.Events.Count(e=>e=="save")==2&&!f.Paused,"post-save runtime mismatch is restored and resaved");
             f=new Fake{IgnoreWrite=true};Reject(()=>CalibrationController.Apply(f,baseline,wanted),"readback mismatch");Check(f.ReadModel().Same(baseline)&&!f.Events.Contains("save"),"readback mismatch prevents save");
             f=new Fake{FailWrite=true,FailRollback=true};Reject(()=>CalibrationController.Apply(f,baseline,wanted),"rollback fault");Check(f.Paused,"failed recovery stays paused");
             f=new Fake{ChangedRecipe=true};Reject(()=>CalibrationController.Apply(f,baseline,wanted),"recipe switched");Check(f.Writes==0,"no writes to changed recipe");
             f=new Fake{ChangeAfterPause=true};Reject(()=>CalibrationController.Apply(f,baseline,wanted),"recipe switches while pausing");Check(f.Writes==0,"prewrite revalidation");
             f=new Fake();f.Values[baseline.Variables[0]]=.9;Reject(()=>CalibrationController.Apply(f,baseline,wanted),"external coefficient edit");Check(f.Writes==0,"external change not overwritten");
             var wrong=new CalibrationModel(baseline.Names,new[]{"x","y","z","q"},baseline.Factors);f=new Fake();Reject(()=>CalibrationController.Apply(f,baseline,wrong),"wrong targets");Check(f.Events.Count==0,"target rejection before device access");
+            // Field report: non-round float coefficients must survive apply/rollback without
+            // rounding them to the decimal text shown in the variable inventory or UI.
+            var fieldBaseline=new CalibrationModel(new[]{"CB","WIRE","INS","CIRCLE"},new[]{"cb_scale","wire_scale","ins_scale","circle_scale"},new[]{(double).020872f,.021026f,.020883f,.0420804382f});
+            var fieldPixels=new[]{(double)(float)680.493164,(double)(float)141.59021,(double)(float)200.405609,(double)(float)154.4319305*2};
+            var fieldActual=new[]{14.28,2.92,4.2,6.49};var fieldWanted=fieldBaseline.Calculate(fieldPixels,fieldActual);
+            for(int i=0;i<4;i++)Check(Math.Abs(fieldPixels[i]*fieldWanted.Factors[i]-fieldActual[i])<.000002,"reported dimensions recover actual size after float cast "+i);
+            Check(fieldWanted.Factors[0]!=(double)float.Parse(((float)fieldWanted.Factors[0]).ToString("F6",CultureInfo.InvariantCulture),CultureInfo.InvariantCulture),"six-place display text cannot verify exact runtime float");
+            f=new Fake(fieldBaseline);CalibrationController.Apply(f,fieldBaseline,fieldWanted);
+            Check(f.ReadModel().Same(fieldWanted)&&!f.Paused,"reported non-round coefficients save with exact float readback");
+            f=new Fake(fieldBaseline){FailSave=true};Reject(()=>CalibrationController.Apply(f,fieldBaseline,fieldWanted),"reported coefficients save fault");
+            Check(f.ReadModel().Same(fieldBaseline)&&!f.Paused,"circle baseline restored exactly without decimal text rounding");
             var collector=new CalibrationFrameCollector();Check(collector.Add(1,0,500)==null,"wait for others");collector.Add(2,1,225);collector.Add(1,2,250);Check(collector.Add(1,3,325)==null,"no mixed execution counts");var frame=collector.Add(1,1,225);Check(frame.Frame==1&&frame.Pixels.SequenceEqual(pixels),"same frame join");collector.Clear();Check(collector.Add(3,0,double.NaN)==null,"invalid callback ignored");
             for(uint i=0;i<1000;i++)collector.Add(i,0,1);Check(collector.Add(999,1,2)==null,"bounded collector");
             var mapping=Mapping();mapping.Validate();Check(mapping.Matches("192.168.10.51","Proc1","/root/A.solx"),"mapping identity");Check(!mapping.Matches("192.168.10.52","Proc1","/root/A.solx"),"other camera rejected");
