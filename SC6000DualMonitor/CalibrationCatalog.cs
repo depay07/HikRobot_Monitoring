@@ -25,12 +25,20 @@ namespace SC6000DualMonitor
             Camera = camera; Procedure = procedure.Name;
             Recipe = new RemoteSolutionSession(null, null).CurrentPath;
             if (string.IsNullOrWhiteSpace(Recipe)) throw new InvalidOperationException("현재 카메라 레시피 경로를 확인할 수 없습니다.");
-            var all = VmSolution.Instance.GetAllModuleList();
-            for (int i = 0; i < all.nNum; i++)
+            var solution = VmSolution.Instance;
+            // Mirror the SDK's LoadGlobleModules: global modules have their own inventory API.
+            var globals = CalibrationDeviceData.GlobalVariables(solution.ServerSDKManagerInstance.mGlobalModuleManager.GetAllGlobalModule());
+            foreach (var info in globals)
             {
-                var global = VmSolution.Instance.GetModuleByID(all.astModuleInfo[i].nModuleID) as GlobalVariableModuleTool;
-                if (global != null) Globals.Add(global);
+                string name = CalibrationDeviceData.Text(info.strDisplayName);
+                var module = solution.GetModuleByID(info.nNodeID);
+                var global = module as GlobalVariableModuleTool;
+                if (global == null)
+                    throw new InvalidOperationException("카메라에서 전역 변수 모듈을 찾았지만 SDK 객체를 불러오지 못했습니다: " + name + " (ID " + info.nNodeID + ") / " +
+                        (module == null ? "객체 없음" : module.GetType().FullName) + ". 변수를 새로 만들지 말고 뷰어를 다시 연결하세요.");
+                Globals.Add(global);
             }
+            if (Globals.Count == 0) throw new InvalidOperationException("카메라의 전역 모듈 목록에서 Global Variable을 찾지 못했습니다.\r\nVisionMaster 주 화면의 빠른 도구 모음에서 'var' 아이콘(Global Variable)을 열어 확인하세요.\r\n'＋ 변수 추가'로 float 단일 값 4개를 만든 뒤 Calculator 입력에 연결하고 카메라에 저장하세요.\r\n이미 설정했다면 뷰어를 다시 연결하세요. 자세한 순서: CALIBRATION.md");
             var local = procedure.GetAllModuleList();
             for (int i = 0; i < local.nNum; i++)
             {
@@ -42,7 +50,6 @@ namespace SC6000DualMonitor
                     if (output.Name == "L2LAbsDist" || output.Name == "CircleRadius")
                         Sources.Add(new CalibrationSource { Module = module, Field = output.Name });
             }
-            if (Globals.Count == 0) throw new InvalidOperationException("레시피에 Global Variable 모듈이 없습니다. VisionMaster에서 float 보정계수 4개를 만들고 계산식에 연결한 후 카메라에 저장하세요. CALIBRATION.md의 준비 절차를 참고하세요.");
         }
         public static string[] Variables(GlobalVariableModuleTool global)
         {

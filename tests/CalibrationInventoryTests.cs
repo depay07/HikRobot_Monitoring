@@ -41,6 +41,17 @@ class CalibrationInventoryTests
         link.strIndex=Bytes("All",256);Check(CalibrationDeviceData.ScalarLink(link,13,13000,"scale1"),"all of scalar accepted");
         link.nIsPubConstant=1;Check(!CalibrationDeviceData.ScalarLink(link,13,13000,"scale1"),"constant rejected");
         link.nIsPubConstant=0;link.nIsIndexConstant=0;Check(!CalibrationDeviceData.ScalarLink(link,13,13000,"scale1"),"variable index rejected");
+        var globalInfo=new ImvsSdkDefine.IMVS_MODULE_INFO{nNodeID=13000,strModuleName=Bytes("GlobalVariableModule",64),strDisplayName=Bytes("Renamed global",256)};
+        var globals=new ImvsSdkDefine.IMVS_MODULE_INFO_LIST{nNum=1,astModuleInfo=new[]{globalInfo}};
+        Check(CalibrationDeviceData.GlobalVariables(globals).Single().nNodeID==13000,"dedicated global inventory resolves module without ordinary module list");
+        globalInfo.strDisplayName=Bytes("새 전역 이름",256); globals.astModuleInfo[0]=globalInfo;
+        Check(CalibrationDeviceData.GlobalVariables(globals).Length==1,"renamed display name does not affect type discovery");
+        Reject(()=>CalibrationDeviceData.GlobalVariables(null),"unavailable inventory is not missing globals");
+        Reject(()=>CalibrationDeviceData.GlobalVariables(new ImvsSdkDefine.IMVS_MODULE_INFO_LIST{nNum=1}),"truncated global inventory rejected");
+        Check(CalibrationDeviceData.GlobalVariables(new ImvsSdkDefine.IMVS_MODULE_INFO_LIST{nNum=0}).Length==0,"valid empty inventory distinguished");
+        Reject(()=>CalibrationDeviceData.GlobalVariables(new ImvsSdkDefine.IMVS_MODULE_INFO_LIST{nNum=2,astModuleInfo=new[]{globalInfo,globalInfo}}),"duplicate global identity rejected");
+        globalInfo.strModuleName=Bytes("GlobalScriptModule",64); globals.astModuleInfo[0]=globalInfo;
+        Check(CalibrationDeviceData.GlobalVariables(globals).Length==0,"global script is not global variable");
         var global=typeof(GlobalVariableModuleCs.GlobalVariableModuleTool);
         Check(global.GetMethod("SetGlobalVar",new[]{typeof(string),typeof(string)})!=null,"public global setter in installed SDK");
         Check(global.GetMethod("GetVarFloat",new[]{typeof(string)})!=null,"typed float readback in installed SDK");

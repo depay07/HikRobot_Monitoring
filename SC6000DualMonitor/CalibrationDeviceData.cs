@@ -21,6 +21,19 @@ namespace SC6000DualMonitor
     // its template %var0% can survive after the camera's actual outputs have been loaded.
     internal static class CalibrationDeviceData
     {
+        internal static ImvsSdkDefine.IMVS_MODULE_INFO[] GlobalVariables(ImvsSdkDefine.IMVS_MODULE_INFO_LIST? inventory)
+        {
+            if (!inventory.HasValue || inventory.Value.nNum > 2064 ||
+                (inventory.Value.nNum > 0 && (inventory.Value.astModuleInfo == null || inventory.Value.nNum > inventory.Value.astModuleInfo.Length)))
+                throw new InvalidOperationException("카메라의 전역 모듈 목록을 읽지 못했습니다. 변수가 없다는 뜻은 아닙니다. 다시 연결하세요.");
+            var list = inventory.Value;
+            var result = new List<ImvsSdkDefine.IMVS_MODULE_INFO>();
+            for (int i = 0; i < list.nNum; i++)
+                if (Text(list.astModuleInfo[i].strModuleName) == "GlobalVariableModule") result.Add(list.astModuleInfo[i]);
+            if (result.Select(m => m.nNodeID).Distinct().Count() != result.Count)
+                throw new InvalidOperationException("카메라 전역 모듈 ID가 중복되어 있습니다. 다시 연결하세요.");
+            return result.ToArray();
+        }
         internal static string Text(byte[] bytes)
         {
             if (bytes == null) throw new InvalidOperationException("카메라 항목 문자열이 없습니다.");
