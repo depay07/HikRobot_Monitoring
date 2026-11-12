@@ -29,3 +29,12 @@ The SDK's VmSolution.LoadGlobleModules calls GlobalModuleManager.GetAllGlobalMod
 Seven additional inventory tests cover dedicated-list discovery, renamed display names, missing/malformed/empty inventories, duplicate IDs and unrelated global module types. They do not establish which native list the field device returned. The field screenshot alone cannot distinguish recipe preparation from inventory omission, and no live camera connection was used.
 
 Menu location was checked against the installed embedded VM 4.4.50 user manual section 9.2, printed pages 208–210 (PDF 224–226): the main quick toolbar var icon opens global variables; the procedure/group bar var icon opens local variables; + Add Variable creates a row with name/type/current value.
+
+
+## Nested circle output discovery — 2026-11-12
+
+The installed IMVSCircleFindModu.xml defines CircleRadius as a float child of OutputCircleAnnulus (ROIANNULUS); CircleCenterPoint is another nested composite. The retained 01.solx uses IMVSCircleFindModu for module 2 and subscribes its CircleRadius into Calculator 13. The old decoder copied only the outer IMVS_MODULE_IO_INFO records and therefore did not offer this radius in the picker. The SDK's AnalysisIOInfo traverses nDataType=2 / nNum / pstCombInfo recursively.
+
+The decoder now copies this hierarchy while keeping the SDK-owned root list alive, without freeing native child buffers. Measurement selection descends to float leaves and retains the actual CircleRadius field name used by subscriptions and result callbacks. Input signatures include nested structure. Duplicate names are checked within their group; ambiguous supported measurement names across groups are rejected. Missing child buffers, cycles, excessive depth and node counts are bounded failures.
+
+Eleven new checks marshal a native hierarchy from the installed circle module's actual XML definition, demonstrate that its root list lacks CircleRadius, then verify selection of its nested radius after native fixture buffers have been freed. They also cover multi-level nesting, flat distance regression, non-float exclusion, scoped repeated names, nested signature changes, ambiguous radii, malformed pointers, cycles and depth limits. The eight existing SDK callback tests still verify radius-to-diameter normalization and execution-number matching. Full calibration suite: 117 checks. This is an offline structural reproduction, not a connected-camera test.

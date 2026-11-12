@@ -7,6 +7,7 @@ using System.Runtime.Serialization;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Web.Script.Serialization;
+using System.Xml;
 using SC6000DualMonitor;
 using VM.Core;
 using VM.PlatformSDKCS;
@@ -25,7 +26,48 @@ class CalibrationInventoryTests
         try{for(int i=0;i<items.Length;i++)Marshal.StructureToPtr(items[i],IntPtr.Add(list.pstModuIoInfo,stride*i),false);return CalibrationDeviceData.Decode(list);}
         finally{Marshal.FreeHGlobal(list.pstModuIoInfo);list.pstModuIoInfo=IntPtr.Zero;GC.SuppressFinalize(list);}
     }
-    static void Run(){
+    sealed class NativeTree : IDisposable
+    {
+        readonly List<IntPtr> buffers=new List<IntPtr>();
+        public ImvsSdkDefine.IMVS_MODULE_IO_INFO Group(string name, params ImvsSdkDefine.IMVS_MODULE_IO_INFO[] children)
+        {
+            var group=Info(name,"ROIANNULUS");group.nDataType=2;group.nNum=children.Length;
+            if(children.Length>0){int stride=Marshal.SizeOf(typeof(ImvsSdkDefine.IMVS_MODULE_IO_INFO));group.pstCombInfo=Marshal.AllocHGlobal(stride*children.Length);buffers.Add(group.pstCombInfo);for(int i=0;i<children.Length;i++)Marshal.StructureToPtr(children[i],IntPtr.Add(group.pstCombInfo,stride*i),false);}
+            return group;
+        }
+        public ImvsSdkDefine.IMVS_MODULE_IO_INFO FromXml(XmlNode node)
+        {
+            if(node.Name=="Combination")return Group(node.Attributes["Name"].Value,node.SelectNodes("Filters/*").Cast<XmlNode>().Select(FromXml).ToArray());
+            return Info(node.Attributes["Name"].Value,node.Attributes["ValueType"].Value);
+        }
+        public void Dispose(){foreach(var p in buffers)Marshal.FreeHGlobal(p);}
+    }
+    static void NestedOutputs(string sdk)
+    {
+        var document=new XmlDocument();document.Load(Path.Combine(sdk,"Module(sp)","x64","Location","IMVSCircleFindModu","IMVSCircleFindModu.xml"));
+        CalibrationOutput[] actual;
+        using(var memory=new NativeTree())actual=Inventory(document.SelectNodes("//Category[@Name='Output']/Items/*").Cast<XmlNode>().Select(memory.FromXml).ToArray());
+        Check(!actual.Any(x=>x.Name=="CircleRadius"),"installed circle definition hides radius inside a composite; old top-level scan misses it");
+        Check(CalibrationDeviceData.Measurements(actual).Select(x=>x.Name).SequenceEqual(new[]{"CircleRadius"}),"real installed circle hierarchy discovers exactly the outer radius");
+        Check(CalibrationDeviceData.Leaves(actual).Any(x=>x.Name=="CircleCenterX"),"multiple nested levels copied, usable after native buffers freed");
+        Check(CalibrationDeviceData.Measurements(Inventory(Info("L2LAbsDist"))).Single().Name=="L2LAbsDist","flat line measurement still selected");
+        Check(CalibrationDeviceData.Measurements(Inventory(Info("CircleRadius","int"))).Length==0,"non-float radius not offered");
+        using(var memory=new NativeTree())
+        {
+            var tree=Inventory(memory.Group("A",Info("X")),memory.Group("B",Info("X")));
+            Check(CalibrationDeviceData.Leaves(tree).Count()==2,"same leaf names in separate groups allowed");
+            var before=Inventory(memory.Group("A",Info("CircleRadius")));
+            var after=Inventory(memory.Group("A",Info("CircleInnerRadius")));
+            Check(CalibrationDeviceData.InventorySignature(before)!=CalibrationDeviceData.InventorySignature(after),"nested binding changes reflected in signature");
+            Reject(()=>CalibrationDeviceData.Measurements(Inventory(memory.Group("A",Info("CircleRadius")),memory.Group("B",Info("CircleRadius")))),"ambiguous measurement leaves rejected");
+            var broken=memory.Group("broken");broken.nNum=1;Reject(()=>Inventory(broken),"missing nested pointer rejected");
+            var cycle=memory.Group("cycle",Info("placeholder"));Marshal.StructureToPtr(cycle,cycle.pstCombInfo,false);Reject(()=>Inventory(cycle),"cyclic child pointer rejected");
+            var deep=Info("CircleRadius");for(int i=0;i<34;i++)deep=memory.Group("group"+i,deep);Reject(()=>Inventory(deep),"excessive nesting bounded");
+        }
+    }
+    static void Run(string sdk){
+        NestedOutputs(sdk);
+
         var native=Inventory(Info("L2LAbsDist"),Info("CircleRadius"),Info("%새_계수%"));
         Check(native.Select(v=>v.Name).SequenceEqual(new[]{"L2LAbsDist","CircleRadius","%새_계수%"}),"native UTF8 names decoded without template cache");
         Check(CalibrationDeviceData.InventorySignature(native)==CalibrationDeviceData.InventorySignature(native.Reverse()),"inventory order independent");
@@ -60,6 +102,6 @@ class CalibrationInventoryTests
     }
     static int Main(string[] args){
         AppDomain.CurrentDomain.AssemblyResolve+=(s,e)=>{string p=Path.Combine(args[0],new AssemblyName(e.Name).Name+".dll");return File.Exists(p)?Assembly.LoadFrom(p):null;};
-        try{Run();return 0;}catch(Exception ex){Console.WriteLine(ex);return 1;}
+        try{Run(args[0]);return 0;}catch(Exception ex){Console.WriteLine(ex);return 1;}
     }
 }

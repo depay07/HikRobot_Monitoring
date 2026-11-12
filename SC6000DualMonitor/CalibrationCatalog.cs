@@ -46,9 +46,8 @@ namespace SC6000DualMonitor
                 if (module == null) continue;
                 var calculator = module as CalculatorModuleTool;
                 if (calculator != null) Calculators.Add(calculator);
-                foreach (var output in CalibrationDeviceData.Outputs(module))
-                    if (output.Name == "L2LAbsDist" || output.Name == "CircleRadius")
-                        Sources.Add(new CalibrationSource { Module = module, Field = output.Name });
+                foreach (var output in CalibrationDeviceData.Measurements(CalibrationDeviceData.Outputs(module)))
+                    Sources.Add(new CalibrationSource { Module = module, Field = output.Name });
             }
         }
         public static string[] Variables(GlobalVariableModuleTool global)
