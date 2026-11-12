@@ -7,16 +7,18 @@ namespace SC6000DualMonitor
 {
     internal sealed class SetupMenuForm : Form
     {
+        public bool RecipeFilesChanged { get; private set; }
         public SetupMenuForm(RemoteInspectionSession session, CameraSettings settings)
         {
             Text = settings.Title + " | Set Up";
             StartPosition = FormStartPosition.CenterParent;
-            ClientSize = new Size(440, 290);
+            ClientSize = new Size(440, 360);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false; MinimizeBox = false; ShowInTaskbar = false;
             Font = new Font("Segoe UI", 10);
-            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(16), ColumnCount = 1, RowCount = 5 };
+            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(16), ColumnCount = 1, RowCount = 6 };
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
@@ -25,7 +27,20 @@ namespace SC6000DualMonitor
             var conditions = new Button { Text = "OK/NG 설정 조건", Dock = DockStyle.Fill };
             var blob = new Button { Text = "BLOB 조건 설정", Dock = DockStyle.Fill };
             var close = new Button { Text = "닫기", Dock = DockStyle.Right, DialogResult = DialogResult.Cancel };
-            layout.Controls.Add(conditions, 0, 1); layout.Controls.Add(blob, 0, 2); layout.Controls.Add(close, 0, 4);
+            layout.Controls.Add(conditions, 0, 1); layout.Controls.Add(blob, 0, 2); layout.Controls.Add(close, 0, 5);
+            var files = new Button { Text = "카메라 레시피 파일 관리", Dock = DockStyle.Fill };
+            layout.Controls.Add(files, 0, 4);
+            files.Click += delegate
+            {
+                try
+                {
+                    var manager = new RecipeFileManager(new RemoteRecipeFileSession(settings.Ip), settings.SolutionDirectory);
+                    using (var form = new RecipeFilesForm(manager, settings.Title + " · " + settings.Ip,
+                        message => CameraLog.Write(settings.Ip, "RecipeFileManager", message)))
+                    { form.ShowDialog(this); RecipeFilesChanged |= form.Changed; }
+                }
+                catch (Exception ex) { MessageBox.Show(this, ex.Message, "카메라 레시피 파일 관리", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+            };
             var calibration = new Button { Text = "치수 보정", Dock = DockStyle.Fill };
             layout.Controls.Add(calibration, 0, 3);
             calibration.Click += delegate

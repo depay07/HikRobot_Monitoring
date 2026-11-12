@@ -57,6 +57,7 @@ namespace SC6000DualMonitor
             _refresh.MinimumSize = _refresh.GetPreferredSize(Size.Empty);
             _change.MinimumSize = _change.GetPreferredSize(Size.Empty);
             Inspection = new InspectionPane(settings);
+            Inspection.RecipeFilesChanged += delegate { RefreshSolutions(false); };
             layout.Controls.Add(_current, 0, 0); layout.Controls.Add(Inspection, 0, 1); layout.Controls.Add(Content, 0, 2); layout.Controls.Add(footer, 0, 3);
             Controls.Add(layout);
             _choices.SelectedIndexChanged += delegate { UpdateEnabled(); }; // Selection never calls Load.

@@ -126,6 +126,12 @@ namespace SC6000DualMonitor
 
         internal static IList<SolutionEntry> Read(IntPtr handle, string directory)
         {
+            return ReadFiles(handle, directory, false).Select(f => new SolutionEntry(f.Path))
+                .GroupBy(e => e.Path, StringComparer.Ordinal).Select(g => g.First())
+                .OrderBy(e => e.ToString(), StringComparer.OrdinalIgnoreCase).ToList();
+        }
+        internal static IList<RecipeFile> ReadFiles(IntPtr handle, string directory, bool regularOnly)
+        {
             if (handle == IntPtr.Zero) throw new InvalidOperationException("카메라 연결 핸들이 없습니다.");
             IntPtr path = IntPtr.Zero, entries = IntPtr.Zero, header = IntPtr.Zero;
             try
@@ -135,7 +141,7 @@ namespace SC6000DualMonitor
                 uint count = 0;
                 int error = FileCount(handle, path, ref count);
                 if (error != 0) throw new VmException(error);
-                if (count == 0) return new List<SolutionEntry>();
+                if (count == 0) return new List<RecipeFile>();
                 if (count > 10000) throw new InvalidOperationException("원격 폴더의 파일 수가 너무 많습니다. Solution 전용 폴더를 지정하세요.");
                 int stride = Marshal.SizeOf(typeof(ImvsSdkDefine.FTP_REMOTE_FILE_INFO));
                 entries = Marshal.AllocHGlobal(checked((int)count * stride));
@@ -149,15 +155,14 @@ namespace SC6000DualMonitor
                 info = (ImvsSdkDefine.FTP_REMOTE_FILE_LIST_INFO)Marshal.PtrToStructure(header, typeof(ImvsSdkDefine.FTP_REMOTE_FILE_LIST_INFO));
                 if (info.FTPFileInfos != entries || info.FileNum < 0 || info.FileNum > count)
                     throw new InvalidOperationException("원격 파일 목록이 조회 중 변경되었거나 반환 형식이 다릅니다. 다시 새로고침하세요.");
-                var result = new List<SolutionEntry>();
+                var result = new List<RecipeFile>();
                 for (int i = 0; i < info.FileNum; i++)
                 {
                     var file = (ImvsSdkDefine.FTP_REMOTE_FILE_INFO)Marshal.PtrToStructure(IntPtr.Add(entries, checked(i * stride)), typeof(ImvsSdkDefine.FTP_REMOTE_FILE_INFO));
-                    string name = Decode(file.FileName);
-                    if (file.FilePermission != null && file.FilePermission.Length > 0 && file.FilePermission[0] == (byte)'d') continue;
-                    if (SolutionPaths.IsSolution(name)) result.Add(new SolutionEntry(SolutionPaths.Join(directory, name)));
+                    var entry = DecodeFile(file, directory, regularOnly);
+                    if (entry != null) result.Add(entry);
                 }
-                return result.GroupBy(e => e.Path, StringComparer.Ordinal).Select(g => g.First()).OrderBy(e => e.ToString(), StringComparer.OrdinalIgnoreCase).ToList();
+                return result;
             }
             finally
             {
@@ -165,6 +170,17 @@ namespace SC6000DualMonitor
                 if (entries != IntPtr.Zero) Marshal.FreeHGlobal(entries);
                 if (path != IntPtr.Zero) Marshal.FreeHGlobal(path);
             }
+        }
+        internal static RecipeFile DecodeFile(ImvsSdkDefine.FTP_REMOTE_FILE_INFO file, string directory, bool regularOnly)
+        {
+            string name = Decode(file.FileName);
+            if (file.FilePermission != null && file.FilePermission.Length > 0 && file.FilePermission[0] == (byte)'d') return null;
+            // Management excludes links and unknown file types rather than following them.
+            if (regularOnly && (file.FilePermission == null || file.FilePermission.Length == 0 || file.FilePermission[0] != (byte)'-' || file.cFileHardLink > 1)) return null;
+            if (!SolutionPaths.IsSolution(name)) return null;
+            return new RecipeFile { Path = SolutionPaths.Join(directory, name), Size = file.FileSize,
+                // Compare opaque server timestamp bytes; do not guess its locale or date format.
+                Modified = Convert.ToBase64String(file.FileTime ?? new byte[0]) };
         }
         private static string Decode(byte[] bytes)
         {
