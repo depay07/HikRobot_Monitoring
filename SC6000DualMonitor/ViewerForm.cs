@@ -152,11 +152,11 @@ namespace SC6000DualMonitor
                 await graphics.ReconnectAsync();
                 if (_recipeLoading || _recipeRefreshPending)
                     throw new InvalidOperationException("화면 갱신 중 레시피가 변경되었습니다. 화면 다시 읽기를 실행하세요.");
-                CameraLog.Write(_settings.Ip, "GraphicsAfterCalibration", "그래픽 선택 복원 및 SDK 갱신 처리 완료");
+                CameraLog.Write(_settings.Ip, "GraphicsAfterSettingsSave", "그래픽 선택 복원 및 SDK 갱신 처리 완료");
             }
             catch (Exception ex)
             {
-                CameraLog.Write(_settings.Ip, "GraphicsAfterCalibrationFailed", ex.ToString());
+                CameraLog.Write(_settings.Ip, "GraphicsAfterSettingsSaveFailed", ex.ToString());
                 throw;
             }
             finally { _graphicsRefreshing = false; RefreshGraphics(); }

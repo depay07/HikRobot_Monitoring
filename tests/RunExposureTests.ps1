@@ -6,7 +6,7 @@ try {
     New-Item -ItemType Directory -Force -Path test-results | Out-Null
     & (Join-Path $BuildTools 'MSBuild.exe') SC6000DualMonitor/SC6000DualMonitor.csproj /t:Build /p:Configuration=Release "/p:ReferencePath=$Sdk" /v:minimal /nologo
     if ($LASTEXITCODE) { throw 'Release build failed' }
-    & (Join-Path $BuildTools 'Roslyn\csc.exe') /nologo /out:test-results/ExposureSettingsTests.exe /r:System.Windows.Forms.dll /r:System.Drawing.dll SC6000DualMonitor/ExposureSettings.cs SC6000DualMonitor/ExposureSetupForm.cs tests/ExposureSettingsTests.cs
+    & (Join-Path $BuildTools 'Roslyn\csc.exe') /nologo /out:test-results/ExposureSettingsTests.exe /r:System.Windows.Forms.dll /r:System.Drawing.dll SC6000DualMonitor/SettingsSaveCompletion.cs SC6000DualMonitor/ExposureSettings.cs SC6000DualMonitor/ExposureSetupForm.cs tests/ExposureSettingsTests.cs
     if ($LASTEXITCODE) { throw 'Exposure tests compilation failed' }
     & ./test-results/ExposureSettingsTests.exe "$PWD/test-results/exposure-preview.png"
     if ($LASTEXITCODE) { throw 'Exposure tests failed' }

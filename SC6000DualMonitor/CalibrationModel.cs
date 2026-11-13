@@ -62,15 +62,10 @@ namespace SC6000DualMonitor
     }
     internal static class CalibrationController
     {
-        public static async Task<string> ApplyAndRefreshAsync(ICalibrationSettingsSession session,
+        public static Task<string> ApplyAndRefreshAsync(ICalibrationSettingsSession session,
             CalibrationModel baseline, CalibrationModel requested, Func<Task> refreshGraphics)
         {
-            Apply(session, baseline, requested);
-            // Display failure must not roll back successfully saved calibration values.
-            if (refreshGraphics != null)
-                try { await refreshGraphics(); }
-                catch (Exception ex) { return "보정계수 저장과 검사 재개는 완료했으나 화면 연결 갱신에 실패했습니다.\r\n" + ex.GetBaseException().Message; }
-            return null;
+            return SettingsSaveCompletion.ApplyAsync(() => Apply(session, baseline, requested), refreshGraphics);
         }
         public static void Apply(ICalibrationSettingsSession session, CalibrationModel baseline, CalibrationModel requested)
         {

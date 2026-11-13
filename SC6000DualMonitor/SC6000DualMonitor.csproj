@@ -102,6 +102,7 @@
     <Compile Include="RemoteExposureSession.cs" />
     <Compile Include="ExposureSetupForm.cs" />
     <Compile Include="SetupMenuForm.cs" />
+    <Compile Include="SettingsSaveCompletion.cs" />
     <Compile Include="CalibrationModel.cs" />
     <Compile Include="CalibrationMapping.cs" />
     <Compile Include="CalibrationCatalog.cs" />
