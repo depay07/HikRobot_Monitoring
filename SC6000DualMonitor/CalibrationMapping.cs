@@ -15,7 +15,8 @@ namespace SC6000DualMonitor
         public uint GlobalModuleId { get; set; }
         public string GlobalModuleName { get; set; }
         public CalibrationMappingRow[] Rows { get; set; }
-        public void Validate()
+        public void Validate() { Validate(true); }
+        public void Validate(bool requireCircleFormula)
         {
             if (string.IsNullOrWhiteSpace(Camera) || string.IsNullOrWhiteSpace(Procedure) || string.IsNullOrWhiteSpace(Recipe) ||
                 string.IsNullOrWhiteSpace(GlobalModuleName) || Rows == null || Rows.Length != 4 || Rows.Any(r => r == null ||
@@ -23,10 +24,17 @@ namespace SC6000DualMonitor
                     (r.Field != "L2LAbsDist" && r.Field != "CircleRadius")) || Rows.Select(r => r.Variable).Distinct(StringComparer.Ordinal).Count() != 4 ||
                 Rows.Select(r => r.SourceId + ":" + r.Field).Distinct().Count() != 4)
                 throw new InvalidOperationException("서로 다른 전역 변수와 측정 모듈 4개를 연결하고 표시 이름을 입력하세요.");
+            foreach (var row in Rows.Where(r => r.Field == "CircleRadius"))
+            {
+                if (row.CircleFormula == CircleCalibrationFormula.Unspecified && !requireCircleFormula) continue;
+                if (row.CircleFormula != CircleCalibrationFormula.RadiusTimesScale && row.CircleFormula != CircleCalibrationFormula.DiameterTimesScale)
+                    throw new InvalidOperationException(row.Label + ": 항목 연결에서 현재 레시피의 원 계산 방식을 선택하세요 (반지름 × 계수 또는 반지름 × 2 × 계수). 이전 연결에는 이 정보가 없어 한 번 확인해야 합니다.");
+            }
         }
         public bool Matches(string camera, string procedure, string recipe)
         { return Camera == camera && Procedure == procedure && Recipe == recipe; }
     }
+    internal enum CircleCalibrationFormula { Unspecified = 0, RadiusTimesScale = 1, DiameterTimesScale = 2 }
     internal sealed class CalibrationMappingRow
     {
         public string Label { get; set; }
@@ -34,6 +42,18 @@ namespace SC6000DualMonitor
         public uint SourceId { get; set; }
         public string SourceName { get; set; }
         public string Field { get; set; }
+        public CircleCalibrationFormula CircleFormula { get; set; }
+        [ScriptIgnore]
+        public double PixelMultiplier
+        {
+            get
+            {
+                if (Field != "CircleRadius") return 1;
+                if (CircleFormula == CircleCalibrationFormula.RadiusTimesScale) return 1;
+                if (CircleFormula == CircleCalibrationFormula.DiameterTimesScale) return 2;
+                throw new InvalidOperationException("원 계산 방식이 지정되지 않았습니다.");
+            }
+        }
     }
     // Local files store wiring only, NEVER coefficients. Actual coefficients belong to the camera recipe.
     internal static class CalibrationMappingStore
@@ -52,7 +72,9 @@ namespace SC6000DualMonitor
             if (!File.Exists(path)) return null;
             var mapping = new JavaScriptSerializer().Deserialize<CalibrationMapping>(File.ReadAllText(path, Encoding.UTF8));
             if (mapping == null || !mapping.Matches(camera, procedure, recipe)) throw new InvalidOperationException("보정 항목 연결 파일의 카메라/레시피가 일치하지 않습니다.");
-            mapping.Validate(); return mapping;
+            // Preserve old labels/wiring so the chooser only needs the missing circle convention.
+            // Resolve and Save still require an explicit convention before any camera write.
+            mapping.Validate(false); return mapping;
         }
         public static void Save(CalibrationMapping mapping)
         {

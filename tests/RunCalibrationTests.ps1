@@ -17,6 +17,10 @@ try {
     if ($LASTEXITCODE) { throw 'SDK tests compilation failed' }
     & ./test-results/CalibrationSdkTests.exe SC6000DualMonitor/bin/Release/SC6000DualMonitor.exe $Sdk
     if ($LASTEXITCODE) { throw 'SDK callback tests failed' }
+    & $compiler /nologo /out:test-results/CalibrationMappingUiTests.exe /r:System.Drawing.dll /r:System.Windows.Forms.dll tests/CalibrationMappingUiTests.cs
+    if ($LASTEXITCODE) { throw 'Mapping UI tests compilation failed' }
+    & ./test-results/CalibrationMappingUiTests.exe SC6000DualMonitor/bin/Release/SC6000DualMonitor.exe $Sdk "$PWD/test-results/calibration-mapping-preview.png"
+    if ($LASTEXITCODE) { throw 'Mapping UI tests failed' }
     $references = @('VM.Core','VM.PlatformSDKCS','VMControls.BaseInterface','VMControls.Interface','GlobalVariableModuleCs') | ForEach-Object { '/r:' + (Join-Path $Sdk ($_ + '.dll')) }
     & $compiler /nologo /out:test-results/CalibrationInventoryTests.exe /r:System.Web.Extensions.dll $references SC6000DualMonitor/CalibrationDeviceData.cs tests/CalibrationInventoryTests.cs
     if ($LASTEXITCODE) { throw 'Inventory tests compilation failed' }

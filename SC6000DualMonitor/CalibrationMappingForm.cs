@@ -12,27 +12,28 @@ namespace SC6000DualMonitor
         private readonly ComboBox _global = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, DisplayMember = "Name" };
         private readonly TextBox[] _labels = new TextBox[4];
         private readonly ComboBox[] _variables = new ComboBox[4], _sources = new ComboBox[4];
+        private readonly ComboBox[] _circleFormulas = new ComboBox[4];
         private readonly Label _status = new Label { Dock = DockStyle.Fill, ForeColor = Color.DarkRed };
         public CalibrationMapping Mapping { get; private set; }
         public CalibrationMappingForm(CalibrationCatalog catalog, CalibrationMapping previous, string error)
         {
             _catalog = catalog;
             Text = "치수 보정 · 항목 연결 (레시피별)";
-            ClientSize = new Size(1020, 500); MinimumSize = new Size(960, 500);
+            ClientSize = new Size(1240, 500); MinimumSize = new Size(1100, 500);
             StartPosition = FormStartPosition.CenterParent; Font = new Font("Segoe UI", 10); MinimizeBox = false; MaximizeBox = false;
             var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(16), ColumnCount = 1, RowCount = 5 };
             foreach (int height in new[] { 135, 36, 190, 65, 42 }) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
             layout.Controls.Add(new Label { Dock = DockStyle.Fill, Text = catalog.Camera + " | " + catalog.Procedure + " | " + catalog.Recipe +
                 "\r\nVisionMaster에서 float 단일 값 전역 변수 4개를 만들고 기존 보정계수를 초기값으로 넣으세요." +
-                "\r\nCalculator 입력에 측정값과 전역 변수를 연결하고 계산식을 아래와 같이 지정하세요." +
-                "\r\n거리: 픽셀 거리 × 계수 / 원 지름: 픽셀 반지름 × 2 × 계수" +
+                "\r\n거리 계산식: 픽셀 거리 × 계수. 원은 현재 Calculator 식에 맞춰 오른쪽의 '원 계산 방식'을 선택하세요." +
+                "\r\n반지름 × 계수: 실제 지름 ÷ 반지름(px) / 반지름 × 2 × 계수: 실제 지름 ÷ 지름(px)" +
                 "\r\n계수는 이 레시피에 저장됩니다. 여기서는 표시 이름과 연결만 지정합니다. 자세한 준비: CALIBRATION.md" }, 0, 0);
             layout.Controls.Add(_global, 0, 1);
-            var table = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 5, CellBorderStyle = TableLayoutPanelCellBorderStyle.Single };
-            table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 23)); table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25)); table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 52));
+            var table = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4, RowCount = 5, CellBorderStyle = TableLayoutPanelCellBorderStyle.Single };
+            foreach (float width in new float[] { 18, 20, 34, 28 }) table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, width));
             for (int i = 0; i < 5; i++) table.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
-            string[] headings = { "화면 표시 이름 (수정 가능)", "저장할 전역 변수", "원본 픽셀 측정 모듈" };
-            for (int i = 0; i < 3; i++) table.Controls.Add(new Label { Text = headings[i], Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter }, i, 0);
+            string[] headings = { "화면 표시 이름 (수정 가능)", "저장할 전역 변수", "원본 픽셀 측정 모듈", "원 계산 방식 (현재 레시피 식)" };
+            for (int i = 0; i < 4; i++) table.Controls.Add(new Label { Text = headings[i], Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter }, i, 0);
             for (int i = 0; i < 4; i++)
             {
                 var old = previous != null && previous.Rows != null && previous.Rows.Length == 4 ? previous.Rows[i] : null;
@@ -40,8 +41,20 @@ namespace SC6000DualMonitor
                 _variables[i] = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
                 _sources[i] = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, DropDownWidth = 650 };
                 _sources[i].Items.AddRange(catalog.Sources.Cast<object>().ToArray());
+                _circleFormulas[i] = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, DropDownWidth = 340, Enabled = false };
+                _circleFormulas[i].Items.AddRange(new object[] { "반지름 × 계수 (×2 없음)", "반지름 × 2 × 계수" });
+                if (old != null && old.CircleFormula == CircleCalibrationFormula.RadiusTimesScale) _circleFormulas[i].SelectedIndex = 0;
+                if (old != null && old.CircleFormula == CircleCalibrationFormula.DiameterTimesScale) _circleFormulas[i].SelectedIndex = 1;
+                int rowIndex = i;
+                _sources[i].SelectedIndexChanged += delegate
+                {
+                    var selected = _sources[rowIndex].SelectedItem as CalibrationSource;
+                    _circleFormulas[rowIndex].Enabled = selected != null && selected.Field == "CircleRadius";
+                    if (!_circleFormulas[rowIndex].Enabled) _circleFormulas[rowIndex].SelectedIndex = -1;
+                };
                 if (old != null) _sources[i].SelectedItem = catalog.Sources.FirstOrDefault(s => s.Module.ID == old.SourceId && s.Module.Name == old.SourceName && s.Field == old.Field);
                 table.Controls.Add(_labels[i], 0, i + 1); table.Controls.Add(_variables[i], 1, i + 1); table.Controls.Add(_sources[i], 2, i + 1);
+                table.Controls.Add(_circleFormulas[i], 3, i + 1);
             }
             layout.Controls.Add(table, 0, 2); layout.Controls.Add(_status, 0, 3);
             _global.SelectedIndexChanged += delegate
@@ -76,7 +89,9 @@ namespace SC6000DualMonitor
                         GlobalModuleId = global.ID, GlobalModuleName = global.Name,
                         Rows = Enumerable.Range(0, 4).Select(i => { var source = (CalibrationSource)_sources[i].SelectedItem;
                             return new CalibrationMappingRow { Label = _labels[i].Text.Trim(), Variable = (string)_variables[i].SelectedItem,
-                                SourceId = source.Module.ID, SourceName = source.Module.Name, Field = source.Field }; }).ToArray() };
+                                SourceId = source.Module.ID, SourceName = source.Module.Name, Field = source.Field,
+                                CircleFormula = source.Field != "CircleRadius" || _circleFormulas[i].SelectedIndex < 0 ? CircleCalibrationFormula.Unspecified :
+                                    (_circleFormulas[i].SelectedIndex == 0 ? CircleCalibrationFormula.RadiusTimesScale : CircleCalibrationFormula.DiameterTimesScale) }; }).ToArray() };
                     catalog.Resolve(Mapping); DialogResult = DialogResult.OK; Close();
                 }
                 catch (Exception ex) { _status.Text = ex.Message; }

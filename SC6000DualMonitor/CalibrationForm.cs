@@ -36,12 +36,12 @@ namespace SC6000DualMonitor
             var table = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 5, RowCount = count + 1, AutoScroll = true, CellBorderStyle = TableLayoutPanelCellBorderStyle.Single };
             foreach (float width in new float[] { 16, 20, 20, 22, 22 }) table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, width));
             for (int i = 0; i <= count; i++) table.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
-            string[] headings = { "현재 레시피 항목", "픽셀 측정값", "실제 치수 (mm)", "현재 계수 (mm/px)", "새 계수 (mm/px)" };
+            string[] headings = { "현재 레시피 항목", "계산에 사용할 픽셀값", "실제 치수 (mm)", "현재 계수", "새 계수" };
             for (int i = 0; i < 5; i++) table.Controls.Add(Cell(headings[i]), i, 0);
             for (int i = 0; i < _actual.Length; i++)
             {
                 table.Controls.Add(Cell(session.Baseline.Names[i] + (session.RadiusInputs[i] ? " (지름)" : "")), 0, i + 1);
-                _pixels[i] = Cell("읽기 전"); table.Controls.Add(_pixels[i], 1, i + 1);
+                _pixels[i] = Cell("읽기 전" + PixelBasis(i)); table.Controls.Add(_pixels[i], 1, i + 1);
                 _actual[i] = new NumericUpDown { DecimalPlaces = 6, Minimum = 0, Maximum = 1000000, Increment = 0.01m, Dock = DockStyle.Fill, ThousandsSeparator = true };
                 _actual[i].ValueChanged += delegate { Recalculate(); };
                 table.Controls.Add(_actual[i], 2, i + 1);
@@ -60,6 +60,8 @@ namespace SC6000DualMonitor
             _timer.Tick += delegate { Poll(); }; _timer.Start();
         }
         private static Label Cell(string text) { return new Label { Text = text, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter }; }
+        private string PixelBasis(int i)
+        { return !_session.RadiusInputs[i] ? "" : (_session.DiameterPixels[i] ? " (지름)" : " (반지름)"); }
         private void BeginRead()
         {
             _frame = null; _requested = null; _apply.Enabled = false;
@@ -79,7 +81,7 @@ namespace SC6000DualMonitor
             if (frame != null)
             {
                 _waiting = false; _frame = frame;
-                for (int i = 0; i < _actual.Length; i++) _pixels[i].Text = frame.Pixels[i].ToString("G9") + (_session.RadiusInputs[i] ? " (지름)" : "");
+                for (int i = 0; i < _actual.Length; i++) _pixels[i].Text = frame.Pixels[i].ToString("G9") + PixelBasis(i);
                 _status.Text = "회차 " + frame.Frame + " / " + frame.Time.ToString("HH:mm:ss") + " 기준 측정값 고정. 표시된 항목의 실제 치수를 입력하세요.";
                 Recalculate();
             }

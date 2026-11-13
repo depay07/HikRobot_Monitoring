@@ -12,7 +12,7 @@ namespace SC6000DualMonitor
         public VmModule Module;
         public string Field;
         public override string ToString()
-        { return Module.Name + " (ID " + Module.ID + ") / " + (Field == "CircleRadius" ? "원 지름 (반지름 × 2)" : "선 간 거리"); }
+        { return Module.Name + " (ID " + Module.ID + ") / " + (Field == "CircleRadius" ? "원 반지름 (CircleRadius)" : "선 간 거리"); }
     }
     internal sealed class CalibrationCatalog
     {
@@ -71,7 +71,7 @@ namespace SC6000DualMonitor
                 // Both operands must reach the same Calculator. Formula semantics are configured in VisionMaster.
                 if (!links.Any(pair => pair.Value.Any(l => CalibrationDeviceData.ScalarLink(l, pair.Key, global.ID, row.Variable)) &&
                     pair.Value.Any(l => CalibrationDeviceData.ScalarLink(l, pair.Key, row.SourceId, row.Field))))
-                    throw new InvalidOperationException(row.Label + ": 측정값과 " + row.Variable + "을 같은 Calculator 입력에 연결하세요. 계산식은 거리 × 계수, 원은 반지름 × 2 × 계수입니다.");
+                    throw new InvalidOperationException(row.Label + ": 측정값과 " + row.Variable + "을 같은 Calculator 입력에 연결하세요. 원 계산 방식은 항목 연결에서 실제 레시피 식과 동일하게 선택하세요.");
             }
             return global;
         }
