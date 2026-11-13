@@ -10,9 +10,12 @@ namespace SC6000DualMonitor
         public static CameraParameterValue Parse(string raw)
         {
             var parts = (raw ?? "").Split('$');
-            if (parts.Length != 1 && parts.Length != 3) throw new InvalidOperationException("카메라 값/범위 응답을 읽을 수 없습니다.");
+            // VM 4.4.50 GlobalSmartCameraParamItem accepts value$min$max with
+            // additional fields. Only the first three fields are numeric bounds;
+            // requiring exactly three rejects valid camera replies.
+            if (parts.Length == 2) throw new InvalidOperationException("카메라 값/범위 응답에 최대값이 없습니다.");
             var result = new CameraParameterValue { Value = Number(parts[0]) };
-            if (parts.Length == 3)
+            if (parts.Length >= 3)
             {
                 result.Min = Number(parts[1]); result.Max = Number(parts[2]);
                 if (result.Min > result.Max || result.Value < result.Min || result.Value > result.Max)

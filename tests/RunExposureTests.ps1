@@ -10,5 +10,9 @@ try {
     if ($LASTEXITCODE) { throw 'Exposure tests compilation failed' }
     & ./test-results/ExposureSettingsTests.exe "$PWD/test-results/exposure-preview.png"
     if ($LASTEXITCODE) { throw 'Exposure tests failed' }
+    & (Join-Path $BuildTools 'Roslyn\csc.exe') /nologo /out:test-results/ExposureSdkContractTests.exe tests/ExposureSdkContractTests.cs
+    if ($LASTEXITCODE) { throw 'Exposure SDK contract tests compilation failed' }
+    & ./test-results/ExposureSdkContractTests.exe $Sdk
+    if ($LASTEXITCODE) { throw 'Exposure SDK contract tests failed' }
 }
 finally { Pop-Location }

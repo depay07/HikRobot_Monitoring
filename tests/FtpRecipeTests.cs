@@ -14,9 +14,9 @@ class FtpRecipeTests
         public List<string> Calls = new List<string>();
         public List<FtpFileRecord> Files = new List<FtpFileRecord>();
         public string Ip, User, Password, LastDirectory, LastDelete, LastFrom, LastTo;
-        public uint Port; public bool Encoded, FailList, FailDelete; public int ProtocolError, AuthError, Deletes, Disconnects;
+        public uint Port; public bool Encoded, FailList, FailDelete, ThrowProtocol; public int ProtocolReturn, AuthError, Deletes, Disconnects;
         public int Initialize() { Calls.Add("init"); return 0; }
-        public int SetProtocol(int protocol) { Calls.Add("protocol:" + protocol); return ProtocolError; }
+        public int SetProtocol(int protocol) { Calls.Add("protocol:" + protocol); if(ThrowProtocol)throw new InvalidOperationException("protocol invocation failed"); return ProtocolReturn; }
         public int Activation(string ip) { Calls.Add("activation"); return 0; }
         public int Connect(string ip, uint port, string user, string password, ref IntPtr handle, bool encoded)
         { Calls.Add("connect"); Ip=ip; Port=port; User=user; Password=password; Encoded=encoded; handle=new IntPtr(7); return AuthError; }
@@ -62,8 +62,14 @@ class FtpRecipeTests
                 Check(Fails(()=>s.List(Folder)).Contains("00000063"),"native login status retained");
                 Check(!a.Calls.Contains("list")&&a.Disconnects==1,"failed login never lists and releases partial handle");
             }
-            a=new Api { ProtocolError=33 };using(var s=Session(a)) {
-                Fails(()=>s.List(Folder));Check(!a.Calls.Contains("connect"),"no fallback to plain FTP after FTPES error");
+            foreach(int undefinedReturn in new[]{33,unchecked((int)0xF34902D0)}) {
+                a=new Api { ProtocolReturn=undefinedReturn };using(var s=Session(a)) {
+                    s.List(Folder);
+                    Check(a.Calls.SequenceEqual(new[]{"init","protocol:2","activation","connect","list"}),"undefined protocol return is not a failure; FTPES only");
+                }
+            }
+            a=new Api { ThrowProtocol=true };using(var s=Session(a)) {
+                Fails(()=>s.List(Folder));Check(!a.Calls.Contains("connect")&&!a.Calls.Contains("activation"),"protocol invocation exception still stops login without plain FTP fallback");
             }
             a=new Api { FailList=true };using(var s=Session(a)) {
                 Fails(()=>s.Exists(Folder+"/absent.solx"));Check(a.Disconnects==1,"query failure never treated as absence");

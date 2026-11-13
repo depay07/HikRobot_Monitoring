@@ -89,10 +89,20 @@ namespace SC6000DualMonitor
         {
             Guard();
             var result = new ExposureSettings {
-                Exposure = CameraParameterValue.Parse(ReadParameter(_solution, _camera.ID, "ExposureTime")),
-                Gain = CameraParameterValue.Parse(ReadParameter(_solution, _camera.ID, "Gain")),
+                Exposure = ReadNumeric("ExposureTime"),
+                Gain = ReadNumeric("Gain"),
                 AutoExposure = Mode("AutoExposureMode"), AutoGain = Mode("AutoGainMode") };
             return result;
+        }
+        private CameraParameterValue ReadNumeric(string name)
+        {
+            string raw = ReadParameter(_solution, _camera.ID, name);
+            try { return CameraParameterValue.Parse(raw); }
+            catch (InvalidOperationException ex)
+            {
+                throw new InvalidOperationException(name + ": " + ex.Message +
+                    " (응답 필드 수: " + (raw ?? "").Split('$').Length + ")", ex);
+            }
         }
         private int Mode(string name)
         {

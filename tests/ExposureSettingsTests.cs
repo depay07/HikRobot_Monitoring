@@ -12,7 +12,7 @@ class ExposureSettingsTests
     static void Check(bool ok, string why) { if (!ok) throw new Exception(why); checks++; }
     static string Fails(Action action) { try { action(); } catch (Exception ex) { checks++; return ex.Message; } throw new Exception("Expected failure"); }
     static ExposureSettings Values(double exposure = 5, double gain = 2)
-    { return new ExposureSettings { Exposure = CameraParameterValue.Parse(exposure.ToString(CultureInfo.InvariantCulture) + "$0.01$100"), Gain = CameraParameterValue.Parse(gain.ToString(CultureInfo.InvariantCulture) + "$0$24") }; }
+    { return new ExposureSettings { Exposure = CameraParameterValue.Parse(exposure.ToString(CultureInfo.InvariantCulture) + "$0.01$100$0.001"), Gain = CameraParameterValue.Parse(gain.ToString(CultureInfo.InvariantCulture) + "$0$24$0.1") }; }
     class Session : IExposureSession
     {
         public ExposureSettings ValuesNow = Values();
@@ -46,9 +46,20 @@ class ExposureSettingsTests
             CultureInfo.CurrentCulture = new CultureInfo("de-DE");
             var parsed = CameraParameterValue.Parse("5.125$0.01$100");
             Check(parsed.Value == 5.125 && parsed.Min == 0.01 && parsed.Max == 100, "device numbers invariant across locales");
+            // Shipped VM4.4.50 GlobalSmartCameraParamItem reads the first three
+            // fields whenever Length > 2; the remaining fields are not bounds.
+            // Synthetic contract fixtures, not recorded camera network traffic.
+            foreach (var raw in new[] { "5.125$0.01$100$0.001", "5.125$0.01$100$", "5.125$0.01$100$extra$metadata" })
+            {
+                var extended = CameraParameterValue.Parse(raw);
+                Check(extended.Value == 5.125 && extended.Min == 0.01 && extended.Max == 100, "SDK extended numeric reply accepted: " + raw);
+                Check(extended.RangeText == "0.01 ~ 100", "extended reply preserves device limits");
+                Fails(() => extended.Validate(101, "Exposure"));
+            }
             CultureInfo.CurrentCulture = culture;
             Check(!CameraParameterValue.Parse("1.25").Min.HasValue, "scalar camera reply supported");
-            foreach (var raw in new[] { "NULL$0$10", "NaN", "Infinity", "1$2", "1$10$2", "20$0$10", "" })
+            foreach (var raw in new[] { "NULL$0$10", "NaN", "Infinity", "1$2", "1$10$2", "20$0$10", "",
+                "NULL$0$10$0", "5$NaN$10$0", "5$0$Infinity$0", "5$10$2$0", "20$0$10$0", "5$$10$0", "5$0$$0" })
                 Fails(() => CameraParameterValue.Parse(raw));
             var s = new Session(); var baseline = s.Read();
             var actual = ExposureController.Apply(s, baseline, 10, 4);

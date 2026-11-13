@@ -64,7 +64,11 @@ namespace SC6000DualMonitor
                 throw new InvalidOperationException("해당 카메라의 config.ini IP와 PASSWORD를 입력하세요.");
             if (_api == null) _api = _factory();
             Check(_api.Initialize(), "FTP 초기화");
-            Check(_api.SetProtocol(2), "FTPES 설정");
+            // The vendor declares int, but FTP_SetProtocol leaves an internal object
+            // pointer in the return register (both x86 and x64), not a status code.
+            // FileTranferTool also ignores this return. Exceptions still propagate;
+            // initialization, activation and login retain their real status checks.
+            _api.SetProtocol(2);
             Check(_api.Activation(_ip), "카메라 활성화 상태 확인");
             // PASSWORD contains a plaintext camera password, not a cached E1 credential.
             Check(_api.Connect(_ip, 21, "vmftp", _password, ref _handle, false), "카메라 FTP 로그인");

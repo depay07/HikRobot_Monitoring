@@ -22,5 +22,9 @@ try {
     if ($LASTEXITCODE) { throw 'x64 FTP load test compilation failed' }
     & ./test-results/FtpNativeLoadTests.exe $Sdk
     if ($LASTEXITCODE) { throw 'x64 FTP load test failed' }
+    & (Join-Path $BuildTools 'Roslyn\csc.exe') /nologo /platform:x86 /out:test-results/FtpNativeLoadTests-x86.exe SC6000DualMonitor/RecipeFileManager.cs SC6000DualMonitor/FtpRecipeSession.cs SC6000DualMonitor/NativeCameraFtp.cs tests/FtpNativeLoadTests.cs
+    if ($LASTEXITCODE) { throw 'x86 FTP protocol test compilation failed' }
+    & ./test-results/FtpNativeLoadTests-x86.exe $Sdk
+    if ($LASTEXITCODE) { throw 'x86 FTP protocol test failed' }
 }
 finally { Pop-Location }
