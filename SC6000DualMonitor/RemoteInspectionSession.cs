@@ -26,6 +26,10 @@ namespace SC6000DualMonitor
         public event EventHandler<InspectionResultEventArgs> ResultArrived;
         public event EventHandler<NgCaptureEventArgs> NgCaptureRequested;
         private readonly NgFrameMatcher _ngFrames = new NgFrameMatcher();
+        // SDK callbacks include start, module data and repeated end notifications.
+        // Keep a bounded history per session, including across settings Pause/Resume.
+        private readonly HashSet<uint> _completedFrames = new HashSet<uint>();
+        private readonly Queue<uint> _completedFrameOrder = new Queue<uint>();
         private long _conditionCallbacks, _procedureCallbacks, _captureRequests;
         public string CaptureDiagnostics
         {
@@ -124,6 +128,15 @@ namespace SC6000DualMonitor
                 InspectionResultEventArgs snapshot;
                 var callback = args as VMControls.Interface.ValueEventArgs;
                 _procedureCallbacks++;
+                if (callback == null || !(callback.Value is ImvsSdkDefine.IMVS_MODULE_WORK_STAUS)) return;
+                var status = (ImvsSdkDefine.IMVS_MODULE_WORK_STAUS)callback.Value;
+                // Status 0 is the procedure end; execute count 0 is not an inspection.
+                // Filter before reading mutable SDK results, capturing or exporting CSV.
+                if (status.nWorkStatus != 0 || status.nExecuteCount == 0) return;
+                uint frame = status.nExecuteCount;
+                if (!_completedFrames.Add(frame)) return;
+                _completedFrameOrder.Enqueue(frame);
+                while (_completedFrameOrder.Count > 128) _completedFrames.Remove(_completedFrameOrder.Dequeue());
                 try
                 {
                     bool normal = _procedure.GetIsExecuteNormal() == 1;
@@ -132,17 +145,17 @@ namespace SC6000DualMonitor
                     InspectionOutcome outcome = InspectionCounter.Classify(normal, text);
                     string detail = outcome == InspectionOutcome.Error ? "Error: " + (string.IsNullOrWhiteSpace(text) ? "판정 결과 없음" : text) : text.Trim().ToUpperInvariant();
                     snapshot = new InspectionResultEventArgs(outcome, detail);
-                    if (callback != null && _ngFrames.Record(callback.ExecuteCount, null, normal, outcome == InspectionOutcome.Error))
-                        RequestCapture(callback.ExecuteCount, outcome == InspectionOutcome.Error ? detail : null);
+                    if (_ngFrames.Record(frame, null, normal, outcome == InspectionOutcome.Error))
+                        RequestCapture(frame, outcome == InspectionOutcome.Error ? detail : null);
                 }
                 catch (Exception ex)
                 {
                     Trace.WriteLine(ex);
                     snapshot = new InspectionResultEventArgs(InspectionOutcome.Error, "결과 읽기 오류: " + ex.Message);
-                    if (callback != null && _ngFrames.Record(callback.ExecuteCount, null, false)) RequestCapture(callback.ExecuteCount, snapshot.Detail);
+                    if (_ngFrames.Record(frame, null, false)) RequestCapture(frame, snapshot.Detail);
                 }
                 // CSV must never interrupt counters or NG/ERROR capture.
-                try { if (callback != null && _csvCapture != null) _csvCapture.ProcedureFinished(callback.ExecuteCount, snapshot.Outcome); }
+                try { if (_csvCapture != null) _csvCapture.ProcedureFinished(frame, snapshot.Outcome); }
                 catch (Exception ex) { System.Diagnostics.Trace.WriteLine("CSV completion: " + ex); }
                 var handler = ResultArrived;
                 if (handler != null) handler(this, snapshot);
