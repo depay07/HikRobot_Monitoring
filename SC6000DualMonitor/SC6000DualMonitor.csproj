@@ -88,6 +88,8 @@
     <Compile Include="SolutionManagement.cs" />
     <Compile Include="RecipeFileManager.cs" />
     <Compile Include="RemoteRecipeFileSession.cs" />
+    <Compile Include="FtpRecipeSession.cs" />
+    <Compile Include="NativeCameraFtp.cs" />
     <Compile Include="RecipeFilesForm.cs" />
     <Compile Include="CurrentRecipeSave.cs" />
     <Compile Include="SolutionPane.cs" />

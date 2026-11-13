@@ -41,10 +41,13 @@ namespace SC6000DualMonitor
             {
                 try
                 {
-                    var manager = new RecipeFileManager(new RemoteRecipeFileSession(settings.Ip), settings.SolutionDirectory);
-                    using (var form = new RecipeFilesForm(manager, settings.Title + " · " + settings.Ip,
-                        message => CameraLog.Write(settings.Ip, "RecipeFileManager", message)))
-                    { form.ShowDialog(this); RecipeFilesChanged |= form.Changed; }
+                    using (var ftp = new RemoteRecipeFileSession(settings.Ip, settings.Password))
+                    {
+                        var manager = new RecipeFileManager(ftp, settings.SolutionDirectory);
+                        using (var form = new RecipeFilesForm(manager, settings.Title + " · " + settings.Ip,
+                            message => CameraLog.Write(settings.Ip, "RecipeFileManager", message)))
+                        { form.ShowDialog(this); RecipeFilesChanged |= form.Changed; }
+                    }
                 }
                 catch (Exception ex) { MessageBox.Show(this, ex.Message, "카메라 레시피 파일 관리", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
             };

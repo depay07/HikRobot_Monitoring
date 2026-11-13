@@ -10,9 +10,17 @@ try {
     if ($LASTEXITCODE) { throw 'Recipe file tests compilation failed' }
     & ./test-results/RecipeFileManagerTests.exe "$PWD/test-results/recipe-files-preview.png"
     if ($LASTEXITCODE) { throw 'Recipe file tests failed' }
-    & (Join-Path $BuildTools 'Roslyn\csc.exe') /nologo /out:test-results/RecipeFileSdkTests.exe tests/RecipeFileSdkTests.cs
+    & (Join-Path $BuildTools 'Roslyn\csc.exe') /nologo /out:test-results/FtpRecipeTests.exe SC6000DualMonitor/RecipeFileManager.cs SC6000DualMonitor/FtpRecipeSession.cs tests/FtpRecipeTests.cs
+    if ($LASTEXITCODE) { throw 'FTPES tests compilation failed' }
+    & ./test-results/FtpRecipeTests.exe
+    if ($LASTEXITCODE) { throw 'FTPES tests failed' }
+    & (Join-Path $BuildTools 'Roslyn\csc.exe') /nologo /platform:x86 /out:test-results/RecipeFileSdkTests.exe tests/RecipeFileSdkTests.cs
     if ($LASTEXITCODE) { throw 'SDK FTP tests compilation failed' }
     & ./test-results/RecipeFileSdkTests.exe SC6000DualMonitor/bin/Release/SC6000DualMonitor.exe $Sdk
     if ($LASTEXITCODE) { throw 'SDK FTP tests failed' }
+    & (Join-Path $BuildTools 'Roslyn\csc.exe') /nologo /platform:x64 /out:test-results/FtpNativeLoadTests.exe SC6000DualMonitor/RecipeFileManager.cs SC6000DualMonitor/FtpRecipeSession.cs SC6000DualMonitor/NativeCameraFtp.cs tests/FtpNativeLoadTests.cs
+    if ($LASTEXITCODE) { throw 'x64 FTP load test compilation failed' }
+    & ./test-results/FtpNativeLoadTests.exe $Sdk
+    if ($LASTEXITCODE) { throw 'x64 FTP load test failed' }
 }
 finally { Pop-Location }
