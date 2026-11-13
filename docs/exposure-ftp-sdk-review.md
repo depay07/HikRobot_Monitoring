@@ -39,3 +39,14 @@ SHA256:
 - 파일 보호/화면 59개, FTP 세션 모의 검사 42개, 설치 SDK 계약 35개 통과.
 - 실제 x64/x86 `FTP_SetProtocol(2)`를 각각 별도 프로세스에서 호출하고 그 반환값을 사용하는 뷰어 세션이 모의 로그인/조회까지 진행하는 것을 확인했다.
 - 네이티브 초기화/활성화/로그인/파일 작업은 호출하지 않았다. 실제 FTP 계정 권한과 현장 파일 변경의 성공 여부는 이 테스트 범위 밖이다.
+
+## 삭제 접근 거부 — 2026-11-13 추가 확인
+
+후속 화면에는 프로토콜 설정 오류가 아닌 `파일 삭제 실패: 0xE0001309`가 표시됐다. 사용자는 **VisionMaster 내장 FileTranferTool에서도 같은 레시피 삭제가 실패한다**고 확인했다.
+
+- 설치된 `Development/V4.x/Includes/ErrorCodeDefine.h` 381행은 `0xE0001309`를 `IMVS_EC_FTP_ACCESS_DENIED`로 정의한다. 로그인 거부는 별도 `0xE0001367` (`IMVS_EC_FTP_LOGIN_DENIED`)이다.
+- 내장 `DirectoryBrowser.AppViewModel.DeleteRemoteOperate`는 `FtpRemoveFile(CurrentRemoteItem.GetFtpPath())`를 호출한다.
+- `DirectoryBrowser.RemoteDirectoryItem.GetFtpPath()`는 `/root/vmtempfiles/ftp/`와 상대 파일 경로를 결합한다. 뷰어도 동일한 전체 장비 경로를 UTF-8로 `FTP_RemoveFile`에 전달한다. 이번 확인으로 임의의 다른 경로로 삭제를 재시도할 근거는 없다.
+- 확인한 DirectoryBrowser.exe SHA256: `dabbac4e016fd72479002b9a834904003712a5cb61f062d964aa97e41019341f`. REA 정적 메타데이터 확인 및 로컬 ILSpy로 해당 메서드를 읽었다. 삭제 동작을 실행하지 않았다.
+
+뷰어에서는 접근 거부와 로그인 실패 안내를 분리하고, 삭제/이름 변경 오류에 대상 경로를 포함하도록 수정했다. 비밀번호를 바꾸라고 오해시키던 일괄 안내를 제거했다. 현재 파일 보호와 오류 후 자동 재시도 금지는 유지한다. 접근 거부 원인이 구체적으로 권한인지 파일 상태인지 이 코드만으로 확정할 수 없다. 카메라의 권한/상태를 확인할 수 없으므로 **실제 삭제 문제는 해결됐다고 판단하지 않는다.**

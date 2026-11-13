@@ -53,9 +53,22 @@ namespace SC6000DualMonitor
         public FtpRecipeSession(string ip, string password, Func<string> current, Func<ICameraFtpApi> factory, Action<string> log)
         { _ip = ip; _password = password; _current = current; _factory = factory; _log = log; }
         public string CurrentPath { get { if (_disposed) throw new ObjectDisposedException("FTP"); return CameraFtpPaths.Full(_current()); } }
-        internal static void Check(int status, string operation)
+        internal static void Check(int status, string operation, string path = null)
         {
-            if (status != 0) throw new InvalidOperationException(operation + " 실패 (FTPES, 오류 코드 0x" + status.ToString("X8") + ").\r\n접속 오류는 해당 카메라의 config.ini IP/PASSWORD와 연결 상태를 확인하세요.");
+            if (status == 0) return;
+            string message = operation + " 실패 (FTPES, 오류 코드 0x" + status.ToString("X8") + ").";
+            if (!string.IsNullOrEmpty(path)) message += "\r\n대상: " + path;
+            // ErrorCodeDefine.h: ACCESS_DENIED is distinct from LOGIN_DENIED.
+            // A refused file operation does not establish a bad password.
+            if (status == unchecked((int)0xE0001309))
+                message += "\r\n카메라 FTP 서버가 해당 작업에 대한 접근을 거부했습니다." +
+                    "\r\n이 코드만으로 권한 또는 파일 상태 중 어느 것이 원인인지 구분할 수 없습니다." +
+                    "\r\nVisionMaster 내장 FTP 도구에서도 실패하면 카메라 관리자/공급업체에 대상 경로와 오류 코드를 전달하세요.";
+            else if (operation == "카메라 FTP 로그인" || operation == "카메라 활성화 상태 확인")
+                message += "\r\n해당 카메라의 config.ini IP/PASSWORD와 연결 상태를 확인하세요.";
+            else
+                message += "\r\n카메라 연결과 해당 작업의 처리 결과를 확인하세요.";
+            throw new InvalidOperationException(message);
         }
         private void Connect()
         {
@@ -114,9 +127,9 @@ namespace SC6000DualMonitor
             });
         }
         public void Delete(string path)
-        { path = CameraFtpPaths.Full(path); Run(() => { Check(_api.Delete(_handle, path), "파일 삭제"); if (_log != null) _log("FTP delete: " + path); return true; }); }
+        { path = CameraFtpPaths.Full(path); Run(() => { Check(_api.Delete(_handle, path), "파일 삭제", path); if (_log != null) _log("FTP delete: " + path); return true; }); }
         public void Rename(string from, string to)
-        { from = CameraFtpPaths.Full(from); to = CameraFtpPaths.Full(to); Run(() => { Check(_api.Rename(_handle, from, to), "이름 변경"); if (_log != null) _log("FTP rename: " + from + " -> " + to); return true; }); }
+        { from = CameraFtpPaths.Full(from); to = CameraFtpPaths.Full(to); Run(() => { Check(_api.Rename(_handle, from, to), "이름 변경", from + " -> " + to); if (_log != null) _log("FTP rename: " + from + " -> " + to); return true; }); }
         private void Disconnect()
         {
             var handle = _handle; _handle = IntPtr.Zero;

@@ -14,7 +14,7 @@ class FtpRecipeTests
         public List<string> Calls = new List<string>();
         public List<FtpFileRecord> Files = new List<FtpFileRecord>();
         public string Ip, User, Password, LastDirectory, LastDelete, LastFrom, LastTo;
-        public uint Port; public bool Encoded, FailList, FailDelete, ThrowProtocol; public int ProtocolReturn, AuthError, Deletes, Disconnects;
+        public uint Port; public bool Encoded, FailList, FailDelete, ThrowProtocol; public int ProtocolReturn, AuthError, DeleteError, Deletes, Disconnects;
         public int Initialize() { Calls.Add("init"); return 0; }
         public int SetProtocol(int protocol) { Calls.Add("protocol:" + protocol); if(ThrowProtocol)throw new InvalidOperationException("protocol invocation failed"); return ProtocolReturn; }
         public int Activation(string ip) { Calls.Add("activation"); return 0; }
@@ -24,7 +24,7 @@ class FtpRecipeTests
         public IList<FtpFileRecord> List(IntPtr h, string directory)
         { Calls.Add("list"); LastDirectory=directory; if(FailList)throw new Exception("query error"); return Files.ToArray(); }
         public int Delete(IntPtr h, string path)
-        { Deletes++; LastDelete=path; if(FailDelete)return 123; Files.RemoveAll(f=>f.Name==RecipeFilePaths.Name(path)); return 0; }
+        { Deletes++; LastDelete=path; if(DeleteError!=0)return DeleteError; if(FailDelete)return 123; Files.RemoveAll(f=>f.Name==RecipeFilePaths.Name(path)); return 0; }
         public int Rename(IntPtr h, string from, string to)
         { LastFrom=from;LastTo=to;Files.Single(f=>f.Name==RecipeFilePaths.Name(from)).Name=RecipeFilePaths.Name(to);return 0; }
     }
@@ -77,6 +77,12 @@ class FtpRecipeTests
             a=new Api { FailDelete=true };using(var s=Session(a)) {
                 Fails(()=>s.Delete(Folder+"/old.solx"));Check(a.Deletes==1&&a.Disconnects==1,"ambiguous mutation never retried");
                 s.List(Folder);Check(a.Calls.Count(c=>c=="connect")==2&&a.Deletes==1,"explicit refresh reconnects without repeating delete");
+            }
+            a=new Api { DeleteError=unchecked((int)0xE0001309) };a.Files.Add(File("한글 검사.solx"));using(var s=Session(a)) {
+                string message=Fails(()=>s.Delete(Folder+"/한글 검사.solx"));
+                Check(message.Contains("E0001309")&&message.Contains(Folder+"/한글 검사.solx")&&message.Contains("접근을 거부"),"access-denied error retains status and exact target");
+                Check(!message.Contains("PASSWORD")&&!message.Contains("config-password"),"delete denial does not misdiagnose login or reveal credential");
+                Check(a.Deletes==1&&a.Files.Count==1&&a.Disconnects==1,"denial leaves mock file intact without destructive retry");
             }
             a=new Api();using(var s=Session(a,password:new string('x',64))) {s.List(Folder);Check(!a.Encoded,"64-character config password is still plaintext not E1");}
             a=new Api();using(var s=Session(a,password:"")) {Fails(()=>s.List(Folder));Check(a.Calls.Count==0,"missing password does not attempt anonymous login");}
