@@ -15,11 +15,11 @@ VisionMaster 4.4.x SDK와 .NET Framework 4.6.1 개발 도구가 설치된 Visual
 
 실행 중 SDK의 Solution 로드 완료 알림을 받으면 화면·레시피 표시·검사 연결을 다시 갱신합니다. 진행 중인 Set Up 창은 닫은 후 갱신합니다. 현재 레시피 경로는 장비 응답을 우선하며, PC의 이전 실행 기록으로 카메라 레시피를 덮어쓰지 않습니다. 카메라가 재부팅 시 어떤 레시피를 복원하는지는 카메라 측 설정을 따릅니다.
 
-`SOLUTION_DIRECTORY`는 수동 변경 목록 조회 폴더이며 비우면 현재 레시피의 폴더를 사용합니다. `SOLUTION_PASSWORD`는 수동으로 레시피를 변경할 때 사용합니다. 하단에서 사용자가 직접 `변경`을 누를 때만 선택 파일을 로드합니다.
+`SOLUTION_DIRECTORY`는 하단 레시피 목록과 Set Up 레시피 관리의 공통 조회 폴더입니다. 기본값은 `/root/vmtempfiles/ftp/`이며, 항목이 없거나 비어 있어도 이 폴더를 사용합니다. `[CAMERA1]`, `[CAMERA2]` 각각 `SOLUTION_DIRECTORY=/root/vmtempfiles/ftp/`로 지정할 수 있습니다. 기존 설정에 다른 경로가 명시되어 있으면 그 경로가 우선합니다. 지정 폴더 바로 아래의 `.sol`/`.solx`를 조회하며 하위 `solution` 폴더를 자동 탐색하거나 파일을 이동하지 않습니다. `SOLUTION_PASSWORD`는 수동으로 레시피를 변경할 때 사용합니다. 하단에서 사용자가 직접 `변경`을 누를 때만 선택 파일을 로드합니다.
 
 ## 카메라 레시피 파일 관리
 
-각 카메라의 **Set Up → 카메라 레시피 파일 관리**에서 작업합니다. 별도 FTP 프로그램이나 추가 로그인 입력 없이 해당 `[CAMERA1]` / `[CAMERA2]`의 기존 `IP`와 `PASSWORD`를 사용합니다. `SOLUTION_PASSWORD`는 파일 관리 로그인에 사용하지 않습니다. `SOLUTION_DIRECTORY`가 있으면 해당 폴더, 비어 있으면 현재 카메라 레시피의 폴더를 표시합니다.
+각 카메라의 **Set Up → 카메라 레시피 파일 관리**에서 작업합니다. 별도 FTP 프로그램이나 추가 로그인 입력 없이 해당 `[CAMERA1]` / `[CAMERA2]`의 기존 `IP`와 `PASSWORD`를 사용합니다. `SOLUTION_PASSWORD`는 파일 관리 로그인에 사용하지 않습니다. 하단 목록과 동일하게 `SOLUTION_DIRECTORY`의 폴더를 표시하며 기본값은 `/root/vmtempfiles/ftp/`입니다.
 
 파일 관리는 VisionMaster 내장 도구와 같은 FTPClientSDK의 **FTPES / 포트 21 / vmftp**로 별도 연결합니다. 저장된 E1 인증값을 읽지 않고 config.ini의 비밀번호를 그대로 사용합니다. 검사/영상용 SDK 연결은 유지하며 파일 관리 창을 닫으면 파일 전송 연결만 종료합니다. 별도 설정 항목은 필요하지 않습니다.
 

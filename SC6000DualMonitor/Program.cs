@@ -195,13 +195,14 @@ namespace SC6000DualMonitor
         {
             string section = "CAMERA" + slot;
             string ip = Get(section + ".IP", string.Empty);
+            string solutionDirectory = Get(section + ".SOLUTION_DIRECTORY", string.Empty).Trim();
 
             return new CameraSettings
             {
                 Ip = ip.Trim(),
                 Password = Get(section + ".PASSWORD", string.Empty),
                 SolutionPath = Get(section + ".SOLUTION_PATH", string.Empty).Trim(),
-                SolutionDirectory = Get(section + ".SOLUTION_DIRECTORY", string.Empty),
+                SolutionDirectory = string.IsNullOrEmpty(solutionDirectory) ? "/root/vmtempfiles/ftp/" : solutionDirectory,
                 SolutionPassword = Get(section + ".SOLUTION_PASSWORD", string.Empty),
                 Title = Get(section + ".TITLE", "SC6000 Camera " + slot),
                 ProcedureName = Get(section + ".PROCEDURE", "Proc1"),
