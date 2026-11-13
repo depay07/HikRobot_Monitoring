@@ -24,7 +24,6 @@ namespace SC6000DualMonitor
         private readonly Label _status;
         private bool _frontendLoaded;
         private DateTime _lastGraphicsRead;
-        private bool _graphicsRefreshing;
         private bool _connected;
         private bool _resizeQueued;
         private readonly Panel _live = new Panel { Dock = DockStyle.Fill };
@@ -79,7 +78,6 @@ namespace SC6000DualMonitor
             _remoteSolutions = new RemoteSolutionSession(settings.SolutionDirectory, settings.SolutionPassword);
             _solutions = new SolutionPane(_remoteSolutions, ReloadFrontend, settings);
             _solutions.GraphicsChanged += ChangeGraphics;
-            _solutions.Inspection.RefreshGraphicsAfterSave = RefreshGraphicsAfterSaveAsync;
             _solutions.SolutionChanging += delegate { ResetCaptureBinding(); _solutions.Inspection.Unbind(); };
             _solutions.SolutionChanged += delegate { BindInspection(); _recipeLoading = _recipeRefreshPending = false; };
             var images = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty, Padding = Padding.Empty };
@@ -110,7 +108,6 @@ namespace SC6000DualMonitor
 
         private void RefreshGraphics()
         {
-            if (IsDisposed || Disposing || _graphicsRefreshing) return;
             _lastGraphicsRead = DateTime.UtcNow;
             try
             {
@@ -124,7 +121,6 @@ namespace SC6000DualMonitor
 
         private void ChangeGraphics(bool enabled)
         {
-            if (_graphicsRefreshing) return;
             if (_recipeLoading || _recipeRefreshPending || !_frontendLoaded || _solutions.IsBusy) { RefreshGraphics(); return; }
             try
             {
@@ -137,29 +133,6 @@ namespace SC6000DualMonitor
                 MessageBox.Show(this, ex.GetBaseException().Message, "Graphics Set1", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
             RefreshGraphics();
-        }
-
-        private async Task RefreshGraphicsAfterSaveAsync()
-        {
-            if (IsDisposed || Disposing || !_frontendLoaded || _frontend == null || _recipeLoading || _recipeRefreshPending)
-                throw new InvalidOperationException("현재 레시피 화면을 사용할 수 없습니다. 화면 다시 읽기를 실행하세요.");
-            if (_graphicsRefreshing) throw new InvalidOperationException("화면 연결을 갱신 중입니다.");
-            var graphics = FrontendGraphics.Bind(_frontend);
-            _graphicsRefreshing = true;
-            _solutions.SetGraphicsState(graphics.State, false, "저장 후 그래픽 연결 갱신 중");
-            try
-            {
-                await graphics.ReconnectAsync();
-                if (_recipeLoading || _recipeRefreshPending)
-                    throw new InvalidOperationException("화면 갱신 중 레시피가 변경되었습니다. 화면 다시 읽기를 실행하세요.");
-                CameraLog.Write(_settings.Ip, "GraphicsAfterSettingsSave", "그래픽 선택 복원 및 SDK 갱신 처리 완료");
-            }
-            catch (Exception ex)
-            {
-                CameraLog.Write(_settings.Ip, "GraphicsAfterSettingsSaveFailed", ex.ToString());
-                throw;
-            }
-            finally { _graphicsRefreshing = false; RefreshGraphics(); }
         }
 
         private void BindInspection()

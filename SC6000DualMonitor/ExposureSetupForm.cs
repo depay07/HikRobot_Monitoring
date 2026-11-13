@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace SC6000DualMonitor
@@ -21,8 +20,6 @@ namespace SC6000DualMonitor
         private readonly TableLayoutPanel _editor;
         private ExposureSettings _baseline;
         private IExposureSession _session;
-        private bool _applying;
-        public Func<Task> RefreshGraphicsAfterSave { get; set; }
         public ExposureSetupForm(string title, Func<IList<IExposureSession>> discover, Action<string> log)
         {
             _discover = discover; _log = log;
@@ -96,19 +93,16 @@ namespace SC6000DualMonitor
             }
             catch (Exception ex) { Fail(ex); }
         }
-        private async void Apply()
+        private void Apply()
         {
-            if (_session == null || _baseline == null || _applying) return;
-            _applying = true;
+            if (_session == null || _baseline == null) return;
             try
             {
                 ValidateChildren();
                 double exposure = (double)_exposure.Value, gain = (double)_gain.Value;
                 _baseline.Validate(exposure, gain);
                 Enabled = false; _state.Text = "노출/게인 적용 및 현재 레시피 저장 중..."; _state.Refresh();
-                ExposureSettings accepted = null;
-                string warning = await SettingsSaveCompletion.ApplyAsync(
-                    () => { accepted = ExposureController.Apply(_session, _baseline, exposure, gain); }, RefreshGraphicsAfterSave);
+                var accepted = ExposureController.Apply(_session, _baseline, exposure, gain);
                 Display(accepted);
                 bool adjusted = !ExposureSettings.Near(exposure, accepted.Exposure.Value) || !ExposureSettings.Near(gain, accepted.Gain.Value);
                 _state.ForeColor = Color.DarkBlue;
@@ -116,17 +110,10 @@ namespace SC6000DualMonitor
                     " ms / Gain " + accepted.Gain.Value.ToString("G9", CultureInfo.InvariantCulture) + " dB" +
                     (adjusted ? "\r\n입력값과 실제 적용값이 다릅니다. 카메라에서 읽은 값을 표시했습니다." : "");
                 if (_log != null) _log(_state.Text);
-                if (warning != null)
-                {
-                    _state.ForeColor = Color.Firebrick; _state.Text = warning;
-                    if (_log != null) _log(warning);
-                }
             }
             catch (Exception ex) { Fail(ex); }
-            finally { _applying = false; Enabled = true; }
+            finally { Enabled = true; }
         }
-        protected override void OnFormClosing(FormClosingEventArgs e)
-        { if (_applying) e.Cancel = true; base.OnFormClosing(e); }
         private void Fail(Exception ex)
         {
             InvalidateValues(); _state.ForeColor = Color.Firebrick; _state.Text = ex.Message;

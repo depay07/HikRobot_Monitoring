@@ -9,7 +9,7 @@ try {
     $compiler = Join-Path $BuildTools 'Roslyn\csc.exe'
     & (Join-Path $BuildTools 'MSBuild.exe') SC6000DualMonitor/SC6000DualMonitor.csproj /t:Rebuild /p:Configuration=Release "/p:ReferencePath=$Sdk" /v:minimal /nologo
     if ($LASTEXITCODE) { throw 'Release build failed' }
-    & $compiler /nologo /out:test-results/CalibrationTests.exe /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.Web.Extensions.dll SC6000DualMonitor/SettingsSaveCompletion.cs SC6000DualMonitor/CalibrationModel.cs SC6000DualMonitor/CalibrationMapping.cs SC6000DualMonitor/CalibrationForm.cs tests/CalibrationTests.cs
+    & $compiler /nologo /out:test-results/CalibrationTests.exe /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.Web.Extensions.dll SC6000DualMonitor/CalibrationModel.cs SC6000DualMonitor/CalibrationMapping.cs SC6000DualMonitor/CalibrationForm.cs tests/CalibrationTests.cs
     if ($LASTEXITCODE) { throw 'Calibration tests compilation failed' }
     & ./test-results/CalibrationTests.exe "$PWD/test-results/calibration-preview.png"
     if ($LASTEXITCODE) { throw 'Calibration tests failed' }

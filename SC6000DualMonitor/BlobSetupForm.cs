@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace SC6000DualMonitor
@@ -28,8 +27,6 @@ namespace SC6000DualMonitor
         private readonly TableLayoutPanel _editor;
         private IBlobSettingsSession _session;
         private BlobSettings _baseline;
-        private bool _applying;
-        public Func<Task> RefreshGraphicsAfterSave { get; set; }
         public BlobSetupForm(string title, Func<IList<BlobEditorTarget>> discover, string preferred)
         {
             _discover = discover; _preferred = preferred;
@@ -110,10 +107,9 @@ namespace SC6000DualMonitor
             _low.Enabled = _high.Enabled = _baseline != null && _baseline.DoubleThreshold;
             _minArea.Enabled = _maxArea.Enabled = _baseline != null && _area.Checked;
         }
-        private async void Apply()
+        private void Apply()
         {
-            if (_session == null || _baseline == null || _applying) return;
-            _applying = true;
+            if (_session == null || _baseline == null) return;
             try
             {
                 ValidateChildren();
@@ -122,15 +118,11 @@ namespace SC6000DualMonitor
                 requested.MinArea = (int)_minArea.Value; requested.MaxArea = (int)_maxArea.Value; requested.AreaEnabled = _area.Checked;
                 requested.Validate();
                 Enabled = false; _state.Text = "BLOB 적용·확인·저장 중..."; _state.Refresh();
-                string warning = await SettingsSaveCompletion.ApplyAsync(
-                    () => BlobSettingsController.Apply(_session, _baseline, requested), RefreshGraphicsAfterSave);
+                BlobSettingsController.Apply(_session, _baseline, requested);
                 if (ReadCamera()) _state.Text = "BLOB 적용 및 카메라 저장 완료";
-                if (warning != null) _state.Text = warning + "\r\n" + _state.Text;
             }
             catch (Exception ex) { _apply.Enabled = false; _baseline = null; _editor.Enabled = false; _state.Text = "실패: " + ex.Message; }
-            finally { _applying = false; Enabled = true; }
+            finally { Enabled = true; }
         }
-        protected override void OnFormClosing(FormClosingEventArgs e)
-        { if (_applying) e.Cancel = true; base.OnFormClosing(e); }
     }
 }

@@ -4,7 +4,6 @@ using System.Drawing;
 using System.Globalization;
 using System.Linq;
 using System.Reflection;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 using SC6000DualMonitor;
 class CalibrationTests
@@ -40,25 +39,6 @@ class CalibrationTests
         {
             var baseline=Model();var pixels=new[]{500d,225,250,325};var actual=new[]{14d,4.5,5,6.5};
             var wanted=baseline.Calculate(pixels,actual);
-            var completed = new Fake(); int refreshes = 0;
-            var pendingRefresh = new TaskCompletionSource<bool>();
-            var pending = CalibrationController.ApplyAndRefreshAsync(completed, baseline, wanted, () => {
-                refreshes++;
-                Check(completed.Events.Last() == "resume" && completed.ReadModel().Same(wanted), "graphics refresh only after verified save and resume");
-                return pendingRefresh.Task;
-            });
-            Check(refreshes == 1 && !pending.IsCompleted, "completion waits for graphics reconnect");
-            pendingRefresh.SetResult(true);
-            Check(pending.GetAwaiter().GetResult() == null, "successful save and reconnect");
-            var displayFailed = new Fake();
-            string displayWarning = CalibrationController.ApplyAndRefreshAsync(displayFailed, baseline, wanted,
-                () => { throw new InvalidOperationException("display failure"); }).GetAwaiter().GetResult();
-            Check(displayWarning.Contains("display failure") && displayWarning.Contains("저장과 검사 재개는 완료"), "display failure reported separately");
-            Check(displayFailed.Writes == 1 && displayFailed.ReadModel().Same(wanted) && !displayFailed.Paused, "display failure never rolls back saved coefficients");
-            var saveFailed = new Fake { FailSave = true }; int forbiddenRefreshes = 0;
-            Reject(() => CalibrationController.ApplyAndRefreshAsync(saveFailed, baseline, wanted,
-                () => { forbiddenRefreshes++; return Task.FromResult(true); }).GetAwaiter().GetResult(), "save failure propagates");
-            Check(forbiddenRefreshes == 0, "no success reconnect after failed calibration transaction");
             Check(wanted.Factors[0]==(double).028f,"14 / 500 canonical camera float");
             Check(wanted.Factors[3]==(double).02f,"6.5 / raw radius 325, no extra doubling");
             Check(wanted.Names.SequenceEqual(baseline.Names),"user names preserved");

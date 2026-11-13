@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace SC6000DualMonitor
@@ -14,8 +13,6 @@ namespace SC6000DualMonitor
         private readonly Button _apply;
         private readonly Label _state;
         private IList<ConditionRange> _ranges;
-        private bool _applying;
-        public Func<Task> RefreshGraphicsAfterSave { get; set; }
         public InspectionSetupForm(IInspectionSettingsSession session, string title)
         {
             _session = session;
@@ -93,10 +90,8 @@ namespace SC6000DualMonitor
                 throw new InvalidOperationException(caption + ": 숫자를 입력하세요.");
             return number;
         }
-        private async void Apply()
+        private void Apply()
         {
-            if (_applying) return;
-            _applying = true;
             try
             {
                 if (_ranges == null) throw new InvalidOperationException("카메라 값을 먼저 다시 읽으세요.");
@@ -110,16 +105,12 @@ namespace SC6000DualMonitor
                 }
                 Enabled = false;
                 _state.Text = "카메라에 적용·확인·저장 중..."; _state.Refresh();
-                string warning = await SettingsSaveCompletion.ApplyAsync(
-                    () => InspectionSettingsController.Apply(_session, requested, _ranges), RefreshGraphicsAfterSave);
+                InspectionSettingsController.Apply(_session, requested, _ranges);
                 if (ReadCamera()) _state.Text = "카메라 적용 및 레시피 저장 완료";
-                if (warning != null) _state.Text = warning + "\r\n" + _state.Text;
             }
             catch (Exception ex) { ShowFailure(ex); }
-            finally { _applying = false; Enabled = true; }
+            finally { Enabled = true; }
         }
-        protected override void OnFormClosing(FormClosingEventArgs e)
-        { if (_applying) e.Cancel = true; base.OnFormClosing(e); }
         private void ShowFailure(Exception ex)
         {
             _state.Text = "실패: " + ex.Message;

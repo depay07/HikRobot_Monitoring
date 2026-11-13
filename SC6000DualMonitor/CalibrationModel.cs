@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Threading.Tasks;
 
 namespace SC6000DualMonitor
 {
@@ -62,11 +61,6 @@ namespace SC6000DualMonitor
     }
     internal static class CalibrationController
     {
-        public static Task<string> ApplyAndRefreshAsync(ICalibrationSettingsSession session,
-            CalibrationModel baseline, CalibrationModel requested, Func<Task> refreshGraphics)
-        {
-            return SettingsSaveCompletion.ApplyAsync(() => Apply(session, baseline, requested), refreshGraphics);
-        }
         public static void Apply(ICalibrationSettingsSession session, CalibrationModel baseline, CalibrationModel requested)
         {
             if (baseline == null || requested == null || !baseline.SameTargets(requested)) throw new InvalidOperationException("기준 측정값을 먼저 읽으세요.");
