@@ -12,6 +12,9 @@ namespace SC6000DualMonitor
         public InspectionPane Inspection { get; private set; }
         public event Action SolutionChanging;
         public event Action SolutionChanged;
+        public event Action<bool> GraphicsChanged;
+        private readonly CheckBox _graphics = new CheckBox { Text = "Graphics Set1", AutoSize = true, AutoCheck = false, Enabled = false };
+        private bool _graphicsAvailable;
         private readonly SolutionController _controller;
         private readonly Action _reloadFrontend;
         private readonly Label _current = new Label { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleRight, AutoEllipsis = true, Text = "Solution: 연결 대기" };
@@ -47,7 +50,10 @@ namespace SC6000DualMonitor
             footer.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
             footer.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             footer.Controls.Add(_state, 0, 0); footer.SetColumnSpan(_state, 4);
-            footer.Controls.Add(_reload, 0, 1); _reload.Anchor = AnchorStyles.Left;
+            var displayTools = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, Margin = Padding.Empty, WrapContents = true };
+            displayTools.Controls.Add(_reload); displayTools.Controls.Add(_graphics);
+            _graphics.Margin = new Padding(6, 8, 3, 3);
+            footer.Controls.Add(displayTools, 0, 1); _reload.Anchor = AnchorStyles.Left;
             footer.Controls.Add(_choices, 1, 1); footer.Controls.Add(_refresh, 2, 1); footer.Controls.Add(_change, 3, 1);
             _refresh.ForeColor = _change.ForeColor = Color.Black;
             _refresh.AutoSize = _change.AutoSize = true;
@@ -64,6 +70,9 @@ namespace SC6000DualMonitor
             _refresh.Click += delegate { RefreshSolutions(false); };
             _change.Click += delegate { ChangeSolution(); };
             _reload.Click += delegate { ReloadDisplay(); };
+            _graphics.Click += delegate {
+                if (_graphics.Enabled && GraphicsChanged != null) GraphicsChanged(_graphics.CheckState != CheckState.Checked);
+            };
             _tip.SetToolTip(_reload, "현재 Operation Interface를 다시 읽습니다. Solution과 카운터는 유지됩니다.");
 
             UpdateEnabled();
@@ -71,6 +80,12 @@ namespace SC6000DualMonitor
         public void Connected()
         {
             _connected = true; ReadCurrent(); RefreshSolutions(true);
+        }
+        public void SetGraphicsState(CheckState state, bool available, string message)
+        {
+            _graphics.CheckState = state; _graphicsAvailable = available;
+            _tip.SetToolTip(_graphics, message);
+            UpdateEnabled();
         }
         private void DisplayCurrent(string path)
         {
@@ -105,6 +120,7 @@ namespace SC6000DualMonitor
         {
             var selected = _choices.SelectedItem as SolutionEntry;
             _reload.Enabled = _refresh.Enabled = _connected && !_busy;
+            _graphics.Enabled = _connected && !_busy && _graphicsAvailable;
             _choices.Enabled = _connected && !_busy && _choices.Items.Count > 0;
             _change.Enabled = _connected && !_busy && selected != null && !SolutionPaths.Same(_currentPath, selected.Path);
         }

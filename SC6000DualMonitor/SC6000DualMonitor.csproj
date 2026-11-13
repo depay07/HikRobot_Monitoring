@@ -82,6 +82,7 @@
     <Compile Include="NgFrameMatcher.cs" />
     <Compile Include="InspectionDisplayHold.cs" />
     <Compile Include="FrontendCapture.cs" />
+    <Compile Include="FrontendGraphics.cs" />
     <Compile Include="MonitorForm.cs" />
     <Compile Include="CameraLayout.cs" />
     <Compile Include="MonitorHeader.cs" />

@@ -23,6 +23,7 @@ namespace SC6000DualMonitor
         private readonly RemoteSolutionSession _remoteSolutions;
         private readonly Label _status;
         private bool _frontendLoaded;
+        private DateTime _lastGraphicsRead;
         private bool _connected;
         private bool _resizeQueued;
         private readonly Panel _live = new Panel { Dock = DockStyle.Fill };
@@ -76,6 +77,7 @@ namespace SC6000DualMonitor
                 Text = settings.Title + "\r\n" + settings.Ip + "\r\n연결 중..." };
             _remoteSolutions = new RemoteSolutionSession(settings.SolutionDirectory, settings.SolutionPassword);
             _solutions = new SolutionPane(_remoteSolutions, ReloadFrontend, settings);
+            _solutions.GraphicsChanged += ChangeGraphics;
             _solutions.SolutionChanging += delegate { ResetCaptureBinding(); _solutions.Inspection.Unbind(); };
             _solutions.SolutionChanged += delegate { BindInspection(); _recipeLoading = _recipeRefreshPending = false; };
             var images = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty, Padding = Padding.Empty };
@@ -95,12 +97,42 @@ namespace SC6000DualMonitor
 
         private void ReloadFrontend()
         {
+            _solutions.SetGraphicsState(CheckState.Unchecked, false, "화면 다시 읽는 중");
             DetachCapture();
             _frontendLoaded = false;
             _frontend.LoadFrontendSource();
             _frontendLoaded = true;
             QueueFrontendResize();
             BeginInvoke(new Action(AttachCapture));
+        }
+
+        private void RefreshGraphics()
+        {
+            _lastGraphicsRead = DateTime.UtcNow;
+            try
+            {
+                if (!_frontendLoaded || _frontend == null || _recipeLoading || _recipeRefreshPending)
+                    throw new InvalidOperationException("카메라 화면 연결 대기 중");
+                var graphics = FrontendGraphics.Bind(_frontend);
+                _solutions.SetGraphicsState(graphics.State, true, "현재 영상의 Graphics Set1 표시를 체크·해제합니다. 레시피 파일에는 저장하지 않습니다.");
+            }
+            catch (Exception ex) { _solutions.SetGraphicsState(CheckState.Unchecked, false, ex.GetBaseException().Message); }
+        }
+
+        private void ChangeGraphics(bool enabled)
+        {
+            if (_recipeLoading || _recipeRefreshPending || !_frontendLoaded || _solutions.IsBusy) { RefreshGraphics(); return; }
+            try
+            {
+                FrontendGraphics.Bind(_frontend).Set(enabled);
+                CameraLog.Write(_settings.Ip, "Graphics", "Graphics Set1=" + enabled);
+            }
+            catch (Exception ex)
+            {
+                CameraLog.Write(_settings.Ip, "Graphics", ex.ToString());
+                MessageBox.Show(this, ex.GetBaseException().Message, "Graphics Set1", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            RefreshGraphics();
         }
 
         private void BindInspection()
@@ -239,6 +271,7 @@ namespace SC6000DualMonitor
         private void OnRecipeLoaded(object sender, EventArgs args) { _recipeLoading = false; _recipeRefreshPending = true; }
         private void CaptureTick()
         {
+            if (DateTime.UtcNow - _lastGraphicsRead > TimeSpan.FromSeconds(2)) RefreshGraphics();
             if (_recipeLoading) return;
             if (_recipeRefreshPending)
             {
