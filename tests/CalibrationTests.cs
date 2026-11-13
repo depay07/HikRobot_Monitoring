@@ -21,8 +21,6 @@ class CalibrationTests
         public int Writes; public CalibrationFrame Next;
         public string Description{get{return "192.168.10.51 | Proc1 / recipe.solx";}}
         public bool[] RadiusInputs{get{return new[]{false,false,false,true};}}
-        public bool UseRadiusPixels;
-        public bool[] DiameterPixels{get{return new[]{false,false,false,!UseRadiusPixels};}}
         public Fake(CalibrationModel baseline=null){Baseline=baseline??Model();for(int i=0;i<4;i++)Values[Baseline.Variables[i]]=Baseline.Factors[i];Values["unrelated_counter"]=99;}
         public CalibrationModel ReadModel(){if(ChangedRecipe)throw new InvalidOperationException("recipe changed");Events.Add("read");return new CalibrationModel(Baseline.Names,Baseline.Variables,Baseline.Variables.Select(v=>Values[v]).ToArray());}
         public void WriteModel(CalibrationModel model){if(ChangedRecipe)throw new InvalidOperationException("recipe changed");Events.Add("write");Writes++;if(FailRollback&&Writes>1)throw new Exception("restore failed");for(int i=0;i<4;i++){if(!IgnoreWrite||Writes>1)Values[model.Variables[i]]=model.Factors[i];if(FailWrite&&Writes==1&&i==1)throw new Exception("partial write");}}
@@ -34,7 +32,7 @@ class CalibrationTests
     }
     static T Field<T>(object o,string n){return (T)o.GetType().GetField(n,BindingFlags.Instance|BindingFlags.NonPublic).GetValue(o);}
     static void Call(object o,string n){o.GetType().GetMethod(n,BindingFlags.Instance|BindingFlags.NonPublic).Invoke(o,null);}
-    static CalibrationMapping Mapping(){return new CalibrationMapping{Camera="192.168.10.51",Procedure="Proc1",Recipe="/root/A.solx",GlobalModuleId=13000,GlobalModuleName="Global Variable1",Rows=Enumerable.Range(0,4).Select(i=>new CalibrationMappingRow{Label="크기 "+i,Variable="scale"+i,SourceId=(uint)i+2,SourceName="측정"+i,Field=i==3?"CircleRadius":"L2LAbsDist",CircleFormula=i==3?CircleCalibrationFormula.DiameterTimesScale:CircleCalibrationFormula.Unspecified}).ToArray()};}
+    static CalibrationMapping Mapping(){return new CalibrationMapping{Camera="192.168.10.51",Procedure="Proc1",Recipe="/root/A.solx",GlobalModuleId=13000,GlobalModuleName="Global Variable1",Rows=Enumerable.Range(0,4).Select(i=>new CalibrationMappingRow{Label="크기 "+i,Variable="scale"+i,SourceId=(uint)i+2,SourceName="측정"+i,Field=i==3?"CircleRadius":"L2LAbsDist"}).ToArray()};}
     [STAThread] static int Main(string[] args)
     {
         try
@@ -42,7 +40,7 @@ class CalibrationTests
             var baseline=Model();var pixels=new[]{500d,225,250,325};var actual=new[]{14d,4.5,5,6.5};
             var wanted=baseline.Calculate(pixels,actual);
             Check(wanted.Factors[0]==(double).028f,"14 / 500 canonical camera float");
-            Check(wanted.Factors[3]==(double).02f,"6.5 / diameter 325, factor excludes radius doubling");
+            Check(wanted.Factors[3]==(double).02f,"6.5 / raw radius 325, no extra doubling");
             Check(wanted.Names.SequenceEqual(baseline.Names),"user names preserved");
             Check(wanted.Variables.SequenceEqual(baseline.Variables),"selected variable names preserved");
             var copy=new CalibrationModel(wanted.Names,wanted.Variables,wanted.Factors);Check(wanted.Same(copy),"float readback equality");
@@ -75,7 +73,7 @@ class CalibrationTests
             // Field report: non-round float coefficients must survive apply/rollback without
             // rounding them to the decimal text shown in the variable inventory or UI.
             var fieldBaseline=new CalibrationModel(new[]{"CB","WIRE","INS","CIRCLE"},new[]{"cb_scale","wire_scale","ins_scale","circle_scale"},new[]{(double).020872f,.021026f,.020883f,.0420804382f});
-            var fieldPixels=new[]{(double)(float)680.493164,(double)(float)141.59021,(double)(float)200.405609,(double)(float)154.4319305*2};
+            var fieldPixels=new[]{(double)(float)680.493164,(double)(float)141.59021,(double)(float)200.405609,(double)(float)154.4319305};
             var fieldActual=new[]{14.28,2.92,4.2,6.49};var fieldWanted=fieldBaseline.Calculate(fieldPixels,fieldActual);
             for(int i=0;i<4;i++)Check(Math.Abs(fieldPixels[i]*fieldWanted.Factors[i]-fieldActual[i])<.000002,"reported dimensions recover actual size after float cast "+i);
             Check(fieldWanted.Factors[0]!=(double)float.Parse(((float)fieldWanted.Factors[0]).ToString("F6",CultureInfo.InvariantCulture),CultureInfo.InvariantCulture),"six-place display text cannot verify exact runtime float");
@@ -83,34 +81,22 @@ class CalibrationTests
             Check(f.ReadModel().Same(fieldWanted)&&!f.Paused,"reported non-round coefficients save with exact float readback");
             f=new Fake(fieldBaseline){FailSave=true};Reject(()=>CalibrationController.Apply(f,fieldBaseline,fieldWanted),"reported coefficients save fault");
             Check(f.ReadModel().Same(fieldBaseline)&&!f.Paused,"circle baseline restored exactly without decimal text rounding");
-            // Both supported recipe conventions must produce the actual diameter after saving.
-            foreach(var mode in new[]{CircleCalibrationFormula.RadiusTimesScale,CircleCalibrationFormula.DiameterTimesScale})
-            {
-                var row=new CalibrationMappingRow{Field="CircleRadius",CircleFormula=mode};
-                var input=(double[])fieldPixels.Clone();input[3]=154.4319305*row.PixelMultiplier;
-                var calibrated=fieldBaseline.Calculate(input,fieldActual);
-                f=new Fake(fieldBaseline);CalibrationController.Apply(f,fieldBaseline,calibrated);
-                double recipeResult=154.4319305*(mode==CircleCalibrationFormula.RadiusTimesScale?1:2)*f.Values["circle_scale"];
-                Check(Math.Abs(recipeResult-6.49)<.000002,"circle recipe returns full diameter in mode "+mode);
-                Check(Math.Abs(calibrated.Factors[3]-(mode==CircleCalibrationFormula.RadiusTimesScale?.042024988681078:.021012494340539))<.00000001,"correct saved circle factor "+mode);
-                for(int i=0;i<3;i++) Check(calibrated.Factors[i]==fieldWanted.Factors[i],"line calibration unchanged "+i+" "+mode);
-                f=new Fake(fieldBaseline){FailSave=true};Reject(()=>CalibrationController.Apply(f,fieldBaseline,calibrated),"save fault "+mode);
-                Check(f.ReadModel().Same(fieldBaseline),"restore original factor without doubling "+mode);
-            }
-            var oldMapping=Mapping();oldMapping.Rows[3].CircleFormula=CircleCalibrationFormula.Unspecified;
+            // Field regression: the existing recipe is raw radius * circle_scale.
+            // 6.49 / 154.4319305 must save ~0.042025, not the former half coefficient.
+            Check(Math.Abs(fieldWanted.Factors[3]-.042024988681078)<.00000001,"circle saves full coefficient without extra diameter conversion");
+            Check(Math.Abs(154.4319305*fieldWanted.Factors[3]-6.49)<.000002,"existing radius-times-scale recipe returns requested diameter");
+            Check(Math.Abs(154.4319305*(fieldWanted.Factors[3]/2)-3.245)<.000002,"regression reproduces previous half-size defect");
             var serializer=new System.Web.Script.Serialization.JavaScriptSerializer();
-            string oldJson=serializer.Serialize(oldMapping).Replace(",\"CircleFormula\":0","");
-            var migrated=serializer.Deserialize<CalibrationMapping>(oldJson);
-            migrated.Validate(false);Check(migrated.Rows[3].Label==oldMapping.Rows[3].Label && migrated.Rows[3].Variable==oldMapping.Rows[3].Variable,"legacy wiring preserved for chooser");
-            Reject(migrated.Validate,"unconfirmed old circle mode cannot be applied");
-            Reject(()=>{var ignored=migrated.Rows[3].PixelMultiplier;},"missing circle mode cannot silently double pixels");
-            migrated.Rows[3].CircleFormula=CircleCalibrationFormula.RadiusTimesScale;migrated.Validate();
-            var restored=serializer.Deserialize<CalibrationMapping>(serializer.Serialize(migrated));
-            restored.Validate();Check(restored.Rows[3].PixelMultiplier==1,"radius convention survives mapping serialization");
-            restored.Rows[3].CircleFormula=CircleCalibrationFormula.DiameterTimesScale;
-            restored=serializer.Deserialize<CalibrationMapping>(serializer.Serialize(restored));Check(restored.Rows[3].PixelMultiplier==2,"diameter convention survives serialization");
-            restored.Rows[3].CircleFormula=(CircleCalibrationFormula)99;Reject(restored.Validate,"unknown mode rejected");
-            Check(new CalibrationMappingRow{Field="L2LAbsDist"}.PixelMultiplier==1,"distance never doubled");
+            string oldJson=serializer.Serialize(Mapping());
+            foreach(int oldMode in new[]{0,1,2})
+            {
+                string legacy=oldJson.Replace("\"Field\":\"CircleRadius\"","\"Field\":\"CircleRadius\",\"CircleFormula\":"+oldMode);
+                var migrated=serializer.Deserialize<CalibrationMapping>(legacy);
+                migrated.Validate();
+                Check(migrated.Rows[3].Label==Mapping().Rows[3].Label && migrated.Rows[3].Variable==Mapping().Rows[3].Variable,"legacy wiring preserved without new selection "+oldMode);
+                Check(!serializer.Serialize(migrated).Contains("CircleFormula"),"old circle option no longer persisted "+oldMode);
+            }
+            serializer.Deserialize<CalibrationMapping>(oldJson).Validate();
             var collector=new CalibrationFrameCollector();Check(collector.Add(1,0,500)==null,"wait for others");collector.Add(2,1,225);collector.Add(1,2,250);Check(collector.Add(1,3,325)==null,"no mixed execution counts");var frame=collector.Add(1,1,225);Check(frame.Frame==1&&frame.Pixels.SequenceEqual(pixels),"same frame join");collector.Clear();Check(collector.Add(3,0,double.NaN)==null,"invalid callback ignored");
             for(uint i=0;i<1000;i++)collector.Add(i,0,1);Check(collector.Add(999,1,2)==null,"bounded collector");
             var mapping=Mapping();mapping.Validate();Check(mapping.Matches("192.168.10.51","Proc1","/root/A.solx"),"mapping identity");Check(!mapping.Matches("192.168.10.52","Proc1","/root/A.solx"),"other camera rejected");
@@ -123,7 +109,7 @@ class CalibrationTests
                 inputs[0].Value=0;Check(!Field<Button>(form,"_apply").Enabled,"invalid input disables apply");inputs[0].Value=14;
                 if(args.Length>0)using(var bitmap=new Bitmap(form.Width,form.Height)){form.DrawToBitmap(bitmap,new Rectangle(Point.Empty,bitmap.Size));bitmap.Save(args[0]);}
             }
-            f=new Fake(fieldBaseline){UseRadiusPixels=true};using(var form=new CalibrationForm(f,"카메라 1 · 반지름 방식"))
+            f=new Fake(fieldBaseline);using(var form=new CalibrationForm(f,"카메라 1 · 반지름 방식"))
             {
                 Call(form,"BeginRead");var raw=(double[])fieldPixels.Clone();raw[3]=154.4319305;
                 f.Next=new CalibrationFrame{Frame=10,Pixels=raw,Time=DateTime.Now};Call(form,"Poll");

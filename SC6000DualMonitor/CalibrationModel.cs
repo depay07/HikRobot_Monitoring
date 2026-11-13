@@ -55,7 +55,6 @@ namespace SC6000DualMonitor
         string Description { get; }
         CalibrationModel Baseline { get; }
         bool[] RadiusInputs { get; }
-        bool[] DiameterPixels { get; }
         void Arm();
         CalibrationFrame TakeFrame();
         void CancelRead();

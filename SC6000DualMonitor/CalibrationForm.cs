@@ -61,7 +61,7 @@ namespace SC6000DualMonitor
         }
         private static Label Cell(string text) { return new Label { Text = text, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter }; }
         private string PixelBasis(int i)
-        { return !_session.RadiusInputs[i] ? "" : (_session.DiameterPixels[i] ? " (지름)" : " (반지름)"); }
+        { return _session.RadiusInputs[i] ? " (반지름)" : ""; }
         private void BeginRead()
         {
             _frame = null; _requested = null; _apply.Enabled = false;

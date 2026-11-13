@@ -15,7 +15,6 @@ namespace SC6000DualMonitor
         private readonly GlobalVariableModuleTool _global;
         private readonly VmModule[] _sources;
         private readonly string[] _fields;
-        private readonly double[] _pixelMultipliers;
         private readonly object _gate = new object();
         private readonly CalibrationFrameCollector _frames;
         private readonly List<VmModule> _subscriptions = new List<VmModule>();
@@ -27,7 +26,6 @@ namespace SC6000DualMonitor
         public string Description { get { return _owner.CameraProcedureDescription + " / " + System.IO.Path.GetFileName(_recipePath) + " / " + _global.Name; } }
         public CalibrationModel Baseline { get; private set; }
         public bool[] RadiusInputs { get { return _fields.Select(f => f == "CircleRadius").ToArray(); } }
-        public bool[] DiameterPixels { get { return _pixelMultipliers.Select(m => m == 2).ToArray(); } }
         public RemoteCalibrationSession(RemoteInspectionSession owner, CalibrationCatalog catalog, CalibrationMapping mapping)
         {
             _owner = owner; _catalog = catalog; _mapping = mapping;
@@ -36,7 +34,6 @@ namespace SC6000DualMonitor
             _binding = catalog.BindingSignature();
             _sources = mapping.Rows.Select(r => catalog.Sources.Single(s => s.Module.ID == r.SourceId && s.Field == r.Field).Module).ToArray();
             _fields = mapping.Rows.Select(r => r.Field).ToArray();
-            _pixelMultipliers = mapping.Rows.Select(r => r.PixelMultiplier).ToArray();
             _frames = new CalibrationFrameCollector(4);
             Baseline = ReadModel();
             try
@@ -98,7 +95,10 @@ namespace SC6000DualMonitor
                     if (!ReferenceEquals(sender, _sources[i])) continue;
                     var results = data.pInfo.Where(f => f.strParamName == _fields[i]).ToArray();
                     if (results.Length != 1 || results[0].nValueStatus != 1 || results[0].nValueNum != 1 || results[0].pFloatValue == null || results[0].pFloatValue.Length != 1) continue;
-                    var complete = _frames.Add(data.nExecuteCount, i, (double)results[0].pFloatValue[0] * _pixelMultipliers[i]);
+                    // The existing circle recipe multiplies CircleRadius by its scale.
+                    // Divide the requested physical diameter by this raw radius: converting
+                    // it to diameter here would halve the scale and the recipe's output.
+                    var complete = _frames.Add(data.nExecuteCount, i, (double)results[0].pFloatValue[0]);
                     if (complete != null) { _ready = complete; _armed = false; break; }
                 }
             }

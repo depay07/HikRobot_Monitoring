@@ -71,7 +71,7 @@ namespace SC6000DualMonitor
                 // Both operands must reach the same Calculator. Formula semantics are configured in VisionMaster.
                 if (!links.Any(pair => pair.Value.Any(l => CalibrationDeviceData.ScalarLink(l, pair.Key, global.ID, row.Variable)) &&
                     pair.Value.Any(l => CalibrationDeviceData.ScalarLink(l, pair.Key, row.SourceId, row.Field))))
-                    throw new InvalidOperationException(row.Label + ": 측정값과 " + row.Variable + "을 같은 Calculator 입력에 연결하세요. 원 계산 방식은 항목 연결에서 실제 레시피 식과 동일하게 선택하세요.");
+                    throw new InvalidOperationException(row.Label + ": 측정값과 " + row.Variable + "을 같은 Calculator 입력에 연결하세요. 계산식은 측정 픽셀값 × 계수입니다.");
             }
             return global;
         }
