@@ -243,10 +243,13 @@ namespace SC6000DualMonitor
             _recipeSave.Begin(); // Resolve before changing camera parameters or execution state.
             _wasContinuous = _procedure.ContinuousRunEnable;
             _wasEnabled = _procedure.IsEnabled;
+            CameraLog.Write(_cameraIp, "SettingsPause", "Procedure=" + _procedureName + "; Continuous=" + _wasContinuous + "; Enabled=" + _wasEnabled);
             lock (_callbackGate) { _paused = true; _ngFrames.Clear(); }
             try
             {
-                _procedure.ContinuousRunEnable = false;
+                // VM 4.4.50 sends StopExecute even for a redundant false assignment.
+                // External-trigger mode is already non-continuous; IsEnabled gates edits.
+                if (_wasContinuous) _procedure.ContinuousRunEnable = false;
                 _procedure.IsEnabled = false;
             }
             catch
@@ -269,7 +272,10 @@ namespace SC6000DualMonitor
             else _procedure.IsEnabled = false;
             // Accept callbacks before restarting continuous acquisition.
             lock (_callbackGate) _paused = false;
-            _procedure.ContinuousRunEnable = _wasContinuous;
+            // Do not send StopExecute after re-enabling an external-trigger procedure.
+            // Only a previously continuous procedure needs an explicit restart.
+            if (_wasContinuous) _procedure.ContinuousRunEnable = true;
+            CameraLog.Write(_cameraIp, "SettingsResume", "Procedure=" + _procedureName + "; Continuous=" + _wasContinuous + "; Enabled=" + _wasEnabled + "; no trailing stop command");
         }
         public void Dispose()
         {
