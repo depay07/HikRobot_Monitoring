@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Drawing;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace SC6000DualMonitor
@@ -18,9 +19,14 @@ namespace SC6000DualMonitor
         private CalibrationModel _requested;
         private DateTime _deadline;
         private bool _waiting;
+        private bool _applying;
+        private readonly Func<Task> _refreshGraphics;
         public CalibrationForm(ICalibrationEditorSession session, string title)
+            : this(session, title, null) { }
+        public CalibrationForm(ICalibrationEditorSession session, string title, Func<Task> refreshGraphics)
         {
             _session = session;
+            _refreshGraphics = refreshGraphics;
             int count = session.Baseline.Count;
             _actual = new NumericUpDown[count]; _pixels = new Label[count]; _factors = new Label[count];
             Text = title + " | 치수 보정";
@@ -100,14 +106,18 @@ namespace SC6000DualMonitor
             try { _requested = _session.Baseline.Calculate(_frame.Pixels, _actual.Select(a => (double)a.Value).ToArray()); _apply.Enabled = true; }
             catch (Exception ex) { _status.Text = ex.Message; }
         }
-        private void Apply()
+        private async void Apply()
         {
-            if (_requested == null) return;
-            _apply.Enabled = _read.Enabled = false;
+            if (_requested == null || _applying) return;
+            _applying = true;
+            foreach (Control control in Controls) control.Enabled = false;
+            _status.Text = "보정계수 저장 및 화면 연결 갱신 중...";
             try
             {
-                CalibrationController.Apply(_session, _session.Baseline, _requested);
-                MessageBox.Show(this, _session.Baseline.Count + "개 보정계수를 현재 카메라 레시피에 저장했습니다. 이후 검사는 저장한 계수로 계산합니다.", "치수 보정 완료", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                string warning = await CalibrationController.ApplyAndRefreshAsync(_session, _session.Baseline, _requested, _refreshGraphics);
+                MessageBox.Show(this, warning ?? (_session.Baseline.Count + "개 보정계수를 현재 카메라 레시피에 저장했습니다. 이후 검사는 저장한 계수로 계산합니다."),
+                    "치수 보정 완료", MessageBoxButtons.OK, warning == null ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+                _applying = false;
                 DialogResult = DialogResult.OK; Close();
             }
             catch (Exception ex)
@@ -116,8 +126,15 @@ namespace SC6000DualMonitor
                 _status.Text = "적용하지 못했습니다. 오류 내용을 확인하세요.";
                 MessageBox.Show(this, ex.Message, "치수 보정", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
-            finally { _read.Enabled = true; }
+            finally
+            {
+                _applying = false;
+                foreach (Control control in Controls) control.Enabled = true;
+                _apply.Enabled = false; _read.Enabled = true;
+            }
         }
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        { if (_applying) e.Cancel = true; base.OnFormClosing(e); }
         protected override void Dispose(bool disposing)
         {
             if (disposing) { _timer.Stop(); _timer.Dispose(); _session.Dispose(); }

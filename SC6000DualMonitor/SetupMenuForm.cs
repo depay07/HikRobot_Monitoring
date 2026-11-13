@@ -8,7 +8,7 @@ namespace SC6000DualMonitor
     internal sealed class SetupMenuForm : Form
     {
         public bool RecipeFilesChanged { get; private set; }
-        public SetupMenuForm(RemoteInspectionSession session, CameraSettings settings)
+        public SetupMenuForm(RemoteInspectionSession session, CameraSettings settings, Func<System.Threading.Tasks.Task> refreshGraphics = null)
         {
             Text = settings.Title + " | Set Up";
             StartPosition = FormStartPosition.CenterParent;
@@ -57,7 +57,7 @@ namespace SC6000DualMonitor
             {
                 try
                 {
-                    CalibrationWorkflow.Show(this, session, settings.Title);
+                    CalibrationWorkflow.Show(this, session, settings.Title, refreshGraphics);
                 }
                 catch (Exception ex)
                 {

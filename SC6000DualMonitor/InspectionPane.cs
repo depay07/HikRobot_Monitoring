@@ -277,11 +277,12 @@ namespace SC6000DualMonitor
             if (_session == null || _setupOpen) return;
             _setupOpen = true;
             bool filesChanged = false;
-            try { using (var form = new SetupMenuForm(_session, _settings)) { form.ShowDialog(this); filesChanged = form.RecipeFilesChanged; } }
+            try { using (var form = new SetupMenuForm(_session, _settings, RefreshGraphicsAfterSave)) { form.ShowDialog(this); filesChanged = form.RecipeFilesChanged; } }
             finally { _setupOpen = false; }
             if (filesChanged && RecipeFilesChanged != null) RecipeFilesChanged();
         }
         public event Action RecipeFilesChanged;
+        public Func<System.Threading.Tasks.Task> RefreshGraphicsAfterSave { get; set; }
         protected override void Dispose(bool disposing)
         {
             if (disposing) { _displayTimer.Stop(); _displayTimer.Dispose(); Unbind(); _csvWriter.Dispose(); _csvEnabled.Dispose(); _csvFolder.Dispose(); _csvMappingButton.Dispose(); _csvState.Dispose(); }

@@ -86,7 +86,7 @@ namespace SC6000DualMonitor
     }
     internal static class CalibrationWorkflow
     {
-        public static void Show(IWin32Window owner, RemoteInspectionSession session, string title)
+        public static void Show(IWin32Window owner, RemoteInspectionSession session, string title, Func<System.Threading.Tasks.Task> refreshGraphics = null)
         {
             var catalog = session.CalibrationCatalog();
             CalibrationMapping mapping = null;
@@ -122,7 +122,7 @@ namespace SC6000DualMonitor
                 using (target)
                 {
                     CalibrationMappingStore.Save(mapping);
-                    using (var form = new CalibrationForm(target, title))
+                    using (var form = new CalibrationForm(target, title, refreshGraphics))
                         if (form.ShowDialog(owner) != DialogResult.Retry) return;
                 }
                 configure = true; error = "";

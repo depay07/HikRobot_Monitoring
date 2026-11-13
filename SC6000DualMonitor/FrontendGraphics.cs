@@ -3,9 +3,11 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Forms.Integration;
 using System.Windows.Media;
+using System.Windows.Threading;
 using Forms = System.Windows.Forms;
 
 namespace SC6000DualMonitor
@@ -51,6 +53,11 @@ namespace SC6000DualMonitor
             if (enabled) { foreach (string path in _targets) if (!paths.Contains(path)) paths.Add(path); }
             else paths.RemoveAll(p => _targets.Contains(p));
             string next = string.Join(";", paths);
+            WritePaths(next);
+        }
+
+        private void WritePaths(string next)
+        {
             if (next == (_path.GetValue(_view, null) as string)) return;
             // Set the public dependency-property source first. Its SDK callback removes OLD
             // output subscriptions, then assigns the new paths and registers NEW subscriptions.
@@ -59,6 +66,31 @@ namespace SC6000DualMonitor
             _source.SetValue(_view, next, null);
             if ((_path.GetValue(_view, null) as string) != next)
                 throw new InvalidOperationException("그래픽 선택 상태가 반영되지 않았습니다.");
+        }
+
+        public Task ReconnectAsync()
+        {
+            var element = _view as DispatcherObject;
+            if (element == null) throw new InvalidOperationException("그래픽 화면 Dispatcher를 찾지 못했습니다.");
+            // SDK RemoveShapeList/UpdateShapeList enqueue Background operations. A barrier
+            // at the same priority waits for each transition, without blocking the UI thread.
+            return ReconnectAsync(() => element.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Background).Task);
+        }
+
+        internal async Task ReconnectAsync(Func<Task> drain)
+        {
+            string original = (_path.GetValue(_view, null) as string) ?? "";
+            try
+            {
+                Set(State == Forms.CheckState.Unchecked);
+                await drain();
+            }
+            finally
+            {
+                // Preserve partial selections and an intentionally unchecked module as well.
+                WritePaths(original);
+                await drain();
+            }
         }
 
         public static FrontendGraphics Bind(Forms.Control frontend)
